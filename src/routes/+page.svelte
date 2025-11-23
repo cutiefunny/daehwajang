@@ -1,5 +1,5 @@
 <script>
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import emblaCarouselSvelte from 'embla-carousel-svelte';
 
 	// 환경변수에서 네이버 클라이언트 ID 가져오기
@@ -62,43 +62,80 @@
 	let mapElement;
 	let map;
 
-	// 지도 초기화 함수
-	function initMap() {
+	// 지도 렌더링 헬퍼 함수
+	function renderMap(lat, lng) {
 		if (!mapElement || !window.naver) return;
 
+		const center = new window.naver.maps.LatLng(lat, lng);
 		const mapOptions = {
-			// 서울 시청 좌표 기준 (원하는 위치로 변경 가능)
-			center: new window.naver.maps.LatLng(37.5665, 126.9780),
-			zoom: 15
+			center: center,
+			zoom: 15, // 줌 레벨 설정
+			scaleControl: false,
+			logoControl: false,
+			mapDataControl: false,
+			zoomControl: true,
+			minZoom: 6
 		};
 
 		map = new window.naver.maps.Map(mapElement, mapOptions);
 
-		// 예시 마커 추가
+		// 현재 위치 마커 표시
 		new window.naver.maps.Marker({
-			position: new window.naver.maps.LatLng(37.5665, 126.9780),
+			position: center,
 			map: map
 		});
 	}
 
-	onMount(() => {
-		// 이미 스크립트가 로드되어 있다면 바로 초기화
-		if (window.naver && window.naver.maps) {
-			initMap();
-		} else {
-			// 스크립트 로드 대기 (Polling 방식)
-			const interval = setInterval(() => {
-				if (window.naver && window.naver.maps) {
-					clearInterval(interval);
-					initMap();
+	// 지도 초기화 및 위치 권한 확인 함수
+	function initMap() {
+		// 이미 지도가 생성되었다면 중복 생성 방지
+		if (map) return;
+
+		// 기본 위치 (서울 시청)
+		const defaultLat = 37.5665;
+		const defaultLng = 126.9780;
+
+		if (navigator.geolocation) {
+			navigator.geolocation.getCurrentPosition(
+				(position) => {
+					// 위치 허용 시: 사용자 현재 위치로 지도 생성
+					renderMap(position.coords.latitude, position.coords.longitude);
+				},
+				(error) => {
+					// 위치 차단/에러 시: 기본 위치로 생성
+					console.warn('Geolocation failed or denied:', error);
+					renderMap(defaultLat, defaultLng);
+				},
+				{
+					enableHighAccuracy: true, // 높은 정확도 사용
+					timeout: 5000,            // 5초 대기
+					maximumAge: 0
 				}
-			}, 100);
+			);
+		} else {
+			// Geolocation 미지원 브라우저
+			renderMap(defaultLat, defaultLng);
 		}
+	}
+
+	onMount(() => {
+		// 스크립트 로드 확인을 위한 폴링 (callback 파라미터를 사용하지 않으므로)
+		const interval = setInterval(() => {
+			if (window.naver && window.naver.maps) {
+				clearInterval(interval);
+				initMap();
+			}
+		}, 100);
+
+		return () => clearInterval(interval);
 	});
 </script>
 
 <svelte:head>
-	<script type="text/javascript" src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpClientId={NAVER_CLIENT_ID}"></script>
+	<script 
+		type="text/javascript" 
+		src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId={NAVER_CLIENT_ID}">
+	</script>
 </svelte:head>
 
 <div class="page-container">
@@ -235,17 +272,18 @@
 		margin: 0;
 	}
 
-	/* 지도 스타일 (수정됨) */
+	/* 지도 스타일 */
 	.map-wrapper {
-		padding: 0 16px; /* 양옆 여백 */
+		padding: 0 16px;
 	}
 
 	.map-container {
 		width: 100%;
-		height: 300px; /* 지도가 보일 수 있도록 높이 지정 */
+		height: 300px;
 		border-radius: 12px;
 		overflow: hidden;
 		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-		background-color: #eee; /* 로딩 전 배경색 */
+		background-color: #f0f0f0;
+		touch-action: none;
 	}
 </style>
