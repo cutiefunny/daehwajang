@@ -1,40 +1,44 @@
 <script>
+	import { onMount } from 'svelte';
 	import emblaCarouselSvelte from 'embla-carousel-svelte';
+
+	// 환경변수에서 네이버 클라이언트 ID 가져오기
+	const NAVER_CLIENT_ID = import.meta.env.VITE_NAVER_MAPS_CLIENT_ID;
 
 	// 슬라이더 옵션
 	let emblaOptions = { loop: false, align: 'start', containScroll: 'trimSnaps' };
 
-	// 현재 시간 (마감 임박 계산용)
+	// 현재 시간
 	const now = new Date();
 
-	// 임시 데이터 (이미지 경로 및 제목 유지, 날짜 필드 추가)
+	// 임시 데이터
 	let meetings = [
 		{
 			id: 1,
 			title: '주말 독서의 장',
 			category: '취미',
-			date: new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000 + 5 * 60 * 60 * 1000).toISOString(), // 3일 5시간 뒤
+			date: new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000 + 5 * 60 * 60 * 1000).toISOString(),
 			image: '/images/book.png'
 		},
 		{
 			id: 2,
 			title: '신천 러닝 크루',
 			category: '운동',
-			date: new Date(now.getTime() + 1 * 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000).toISOString(), // 1일 2시간 뒤
+			date: new Date(now.getTime() + 1 * 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000).toISOString(),
 			image: '/images/run.png'
 		},
 		{
 			id: 3,
 			title: '카페 투어',
 			category: '맛집',
-			date: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7일 뒤
+			date: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
 			image: '/images/cafe.png'
 		},
 		{
 			id: 4,
 			title: '개발자 네트워킹',
 			category: '자기계발',
-			date: new Date(now.getTime() + 12 * 60 * 60 * 1000).toISOString(), // 12시간 뒤
+			date: new Date(now.getTime() + 12 * 60 * 60 * 1000).toISOString(),
 			image: 'https://placehold.co/600x400/black/white?text=Dev'
 		}
 	];
@@ -53,7 +57,49 @@
 		if (days === 0) return `${hours}시간 남음`;
 		return `${days}일 ${hours}시간 남음`;
 	}
+
+	// 지도 엘리먼트 참조
+	let mapElement;
+	let map;
+
+	// 지도 초기화 함수
+	function initMap() {
+		if (!mapElement || !window.naver) return;
+
+		const mapOptions = {
+			// 서울 시청 좌표 기준 (원하는 위치로 변경 가능)
+			center: new window.naver.maps.LatLng(37.5665, 126.9780),
+			zoom: 15
+		};
+
+		map = new window.naver.maps.Map(mapElement, mapOptions);
+
+		// 예시 마커 추가
+		new window.naver.maps.Marker({
+			position: new window.naver.maps.LatLng(37.5665, 126.9780),
+			map: map
+		});
+	}
+
+	onMount(() => {
+		// 이미 스크립트가 로드되어 있다면 바로 초기화
+		if (window.naver && window.naver.maps) {
+			initMap();
+		} else {
+			// 스크립트 로드 대기 (Polling 방식)
+			const interval = setInterval(() => {
+				if (window.naver && window.naver.maps) {
+					clearInterval(interval);
+					initMap();
+				}
+			}, 100);
+		}
+	});
 </script>
+
+<svelte:head>
+	<script type="text/javascript" src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpClientId={NAVER_CLIENT_ID}"></script>
+</svelte:head>
 
 <div class="page-container">
 	<section class="section">
@@ -84,8 +130,8 @@
 
 	<section class="section">
 		<h2 class="section-title">내 주변 대화장</h2>
-		<div class="placeholder-box">
-			<p>지도 또는 리스트 뷰가 들어갈 자리입니다.</p>
+		<div class="map-wrapper">
+			<div bind:this={mapElement} id="map" class="map-container"></div>
 		</div>
 	</section>
 </div>
@@ -119,11 +165,11 @@
 	.embla__container {
 		display: flex;
 		gap: 16px;
-		padding: 0 16px; /* 양옆 여백 */
+		padding: 0 16px;
 	}
 
 	.embla__slide {
-		flex: 0 0 80%; /* 카드가 화면의 80%를 차지하도록 설정 */
+		flex: 0 0 80%;
 		min-width: 0;
 	}
 
@@ -138,9 +184,8 @@
 		flex-direction: column;
 	}
 
-	/* 이미지 영역 래퍼 (추가됨) */
 	.card-image-wrapper {
-		position: relative; /* 배지 위치 기준점 */
+		position: relative;
 		width: 100%;
 		height: 140px;
 	}
@@ -151,18 +196,17 @@
 		object-fit: cover;
 	}
 
-	/* 남은 시간 배지 스타일 (추가됨) */
 	.time-badge {
 		position: absolute;
 		top: 10px;
 		right: 10px;
-		background-color: rgba(0, 0, 0, 0.6); /* 반투명 검정 배경 */
+		background-color: rgba(0, 0, 0, 0.6);
 		color: white;
 		font-size: 11px;
 		font-weight: bold;
 		padding: 4px 8px;
 		border-radius: 12px;
-		backdrop-filter: blur(4px); /* 배경 블러 효과 */
+		backdrop-filter: blur(4px);
 		z-index: 10;
 	}
 
@@ -191,15 +235,17 @@
 		margin: 0;
 	}
 
-	.placeholder-box {
-		margin: 0 16px;
-		height: 100px;
-		background-color: #f9f9f9;
+	/* 지도 스타일 (수정됨) */
+	.map-wrapper {
+		padding: 0 16px; /* 양옆 여백 */
+	}
+
+	.map-container {
+		width: 100%;
+		height: 300px; /* 지도가 보일 수 있도록 높이 지정 */
 		border-radius: 12px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		color: #aaa;
-		border: 1px dashed #ccc;
+		overflow: hidden;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+		background-color: #eee; /* 로딩 전 배경색 */
 	}
 </style>
