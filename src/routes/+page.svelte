@@ -11,35 +11,39 @@
 	// 현재 시간
 	const now = new Date();
 
-	// 임시 데이터
+	// 임시 데이터: 좌표(lat, lng) 없이 주소(location)만 존재
 	let meetings = [
 		{
 			id: 1,
 			title: '주말 독서의 장',
 			category: '취미',
 			date: new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000 + 5 * 60 * 60 * 1000).toISOString(),
-			image: '/images/book.png'
+			image: '/images/book.png',
+			location: '대구 중구 북성로 104-15'
 		},
 		{
 			id: 2,
 			title: '신천 러닝 크루',
 			category: '운동',
 			date: new Date(now.getTime() + 1 * 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000).toISOString(),
-			image: '/images/run.png'
+			image: '/images/run.png',
+			location: '대구 중구 국채보상로152길 6-5'
 		},
 		{
 			id: 3,
 			title: '카페 투어',
 			category: '맛집',
 			date: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-			image: '/images/cafe.png'
+			image: '/images/cafe.png',
+			location: '대구 중구 동성로4길 91'
 		},
 		{
 			id: 4,
 			title: '개발자 네트워킹',
 			category: '자기계발',
 			date: new Date(now.getTime() + 12 * 60 * 60 * 1000).toISOString(),
-			image: 'https://placehold.co/600x400/black/white?text=Dev'
+			image: 'https://placehold.co/600x400/black/white?text=Dev',
+			location: '경기도 성남시 분당구 불정로 6' // 네이버 그린팩토리
 		}
 	];
 
@@ -62,35 +66,93 @@
 	let mapElement;
 	let map;
 
-	// 지도 렌더링 헬퍼 함수
-	function renderMap(lat, lng) {
+	// 주소를 좌표로 변환하여 마커를 찍는 함수 (Geocoding)
+	function addMarkerFromAddress(meeting) {
+		if (!window.naver || !map) return;
+
+		window.naver.maps.Service.geocode(
+			{
+				query: meeting.location // 주소 전달
+			},
+			function (status, response) {
+				// 변환 실패 시 처리
+				if (status !== window.naver.maps.Service.Status.OK) {
+					console.warn('주소 검색 실패: ' + meeting.location);
+					return;
+				}
+
+				const result = response.v2; // 검색 결과
+				const items = result.addresses;
+
+				if (items.length > 0) {
+					// 첫 번째 결과의 좌표 사용 (x: 경도, y: 위도)
+					const x = parseFloat(items[0].x);
+					const y = parseFloat(items[0].y);
+					const position = new window.naver.maps.LatLng(y, x);
+
+					// 마커 생성
+					new window.naver.maps.Marker({
+						position: position,
+						map: map,
+						title: meeting.title
+					});
+				}
+			}
+		);
+	}
+
+	// 지도 생성 함수
+	function createMap(centerLat, centerLng, isMyLocation) {
 		if (!mapElement || !window.naver) return;
 
-		const center = new window.naver.maps.LatLng(lat, lng);
+		const center = new window.naver.maps.LatLng(centerLat, centerLng);
+
 		const mapOptions = {
 			center: center,
-			zoom: 15, // 줌 레벨 설정
+			zoom: 14,
+			minZoom: 6,
 			scaleControl: false,
 			logoControl: false,
 			mapDataControl: false,
 			zoomControl: true,
-			minZoom: 6
+			zoomControlOptions: {
+				position: window.naver.maps.Position.TOP_RIGHT
+			}
 		};
 
 		map = new window.naver.maps.Map(mapElement, mapOptions);
 
-		// 현재 위치 마커 표시
-		new window.naver.maps.Marker({
-			position: center,
-			map: map
+		// 내 위치 마커 (파란색 점)
+		if (isMyLocation) {
+			new window.naver.maps.Marker({
+				position: center,
+				map: map,
+				title: '내 위치',
+				zIndex: 100,
+				icon: {
+					content: `
+						<div style="
+							width: 20px; 
+							height: 20px; 
+							background: #4285F4; 
+							border: 3px solid white; 
+							border-radius: 50%; 
+							box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+						"></div>
+					`,
+					anchor: new window.naver.maps.Point(10, 10)
+				}
+			});
+		}
+
+		// 3. 모든 모임에 대해 주소 -> 좌표 변환 후 마커 생성
+		meetings.forEach((meeting) => {
+			addMarkerFromAddress(meeting);
 		});
 	}
 
-	// 지도 초기화 및 위치 권한 확인 함수
-	function initMap() {
-		// 이미 지도가 생성되었다면 중복 생성 방지
-		if (map) return;
-
+	// 위치 권한 확인 및 초기화 시작
+	function startMapInitialization() {
 		// 기본 위치 (서울 시청)
 		const defaultLat = 37.5665;
 		const defaultLng = 126.9780;
@@ -98,32 +160,26 @@
 		if (navigator.geolocation) {
 			navigator.geolocation.getCurrentPosition(
 				(position) => {
-					// 위치 허용 시: 사용자 현재 위치로 지도 생성
-					renderMap(position.coords.latitude, position.coords.longitude);
+					createMap(position.coords.latitude, position.coords.longitude, true);
 				},
 				(error) => {
-					// 위치 차단/에러 시: 기본 위치로 생성
-					console.warn('Geolocation failed or denied:', error);
-					renderMap(defaultLat, defaultLng);
+					console.warn('위치 정보 접근 권한이 없거나 에러 발생:', error);
+					createMap(defaultLat, defaultLng, false);
 				},
-				{
-					enableHighAccuracy: true, // 높은 정확도 사용
-					timeout: 5000,            // 5초 대기
-					maximumAge: 0
-				}
+				{ enableHighAccuracy: true, timeout: 5000 }
 			);
 		} else {
-			// Geolocation 미지원 브라우저
-			renderMap(defaultLat, defaultLng);
+			createMap(defaultLat, defaultLng, false);
 		}
 	}
 
 	onMount(() => {
-		// 스크립트 로드 확인을 위한 폴링 (callback 파라미터를 사용하지 않으므로)
+		// 스크립트 로드 확인을 위한 폴링
 		const interval = setInterval(() => {
-			if (window.naver && window.naver.maps) {
+			// window.naver.maps.Service가 로드되었는지까지 확인해야 함
+			if (window.naver && window.naver.maps && window.naver.maps.Service) {
 				clearInterval(interval);
-				initMap();
+				startMapInitialization();
 			}
 		}, 100);
 
@@ -134,7 +190,7 @@
 <svelte:head>
 	<script 
 		type="text/javascript" 
-		src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId={NAVER_CLIENT_ID}">
+		src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId={NAVER_CLIENT_ID}&submodules=geocoder">
 	</script>
 </svelte:head>
 
@@ -157,6 +213,7 @@
 							<div class="card-content">
 								<span class="badge">{meeting.category}</span>
 								<h3 class="card-title">{meeting.title}</h3>
+								<p class="card-location">📍 {meeting.location}</p>
 							</div>
 						</div>
 					</div>
@@ -216,7 +273,7 @@
 		overflow: hidden;
 		background-color: white;
 		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-		height: 240px;
+		height: 260px;
 		display: flex;
 		flex-direction: column;
 	}
@@ -263,13 +320,22 @@
 		padding: 4px 8px;
 		border-radius: 4px;
 		align-self: flex-start;
-		margin-bottom: 8px;
+		margin-bottom: 6px;
 	}
 
 	.card-title {
 		font-size: 18px;
 		font-weight: bold;
+		margin: 0 0 4px 0;
+	}
+
+	.card-location {
+		font-size: 12px;
+		color: #888;
 		margin: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	/* 지도 스타일 */
