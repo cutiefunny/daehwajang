@@ -1,5 +1,5 @@
 <script>
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte'; // onDestroy 추가
 	import emblaCarouselSvelte from 'embla-carousel-svelte';
 	import { db } from '$lib/firebase';
 	import { collection, getDocs, query, orderBy, where, limit } from 'firebase/firestore';
@@ -7,7 +7,15 @@
 	import { X } from 'lucide-svelte';
 
 	const NAVER_CLIENT_ID = import.meta.env.VITE_NAVER_MAPS_CLIENT_ID;
+	
+	// 모임 슬라이더 옵션
 	let emblaOptions = { loop: false, align: 'start', containScroll: 'trimSnaps' };
+	
+	// [추가] 이벤트 슬라이더 관련 변수
+	let eventEmblaApi;
+	let eventEmblaOptions = { loop: true, align: 'center' };
+	let activeEvents = [];
+	let autoplayInterval;
 
 	// 데이터 상태
 	let meetings = [];
@@ -18,7 +26,6 @@
 	let activeBanner = null;
 	let dontShowChecked = false;
 
-	// [추가] 로컬 시간 기준 'YYYY-MM-DD' 문자열 반환 함수
 	function getLocalTodayString() {
 		const now = new Date();
 		const year = now.getFullYear();
@@ -40,132 +47,128 @@
 				orderBy('date', 'asc'),
 				limit($appSettings.sliderLimit)
 			);
-			
 			const querySnapshot = await getDocs(q);
-			meetings = querySnapshot.docs.map(doc => ({
-				id: doc.id,
-				...doc.data()
-			}));
-		} catch (error) {
-			console.error("모임 데이터 불러오기 실패:", error);
-		} finally {
-			isLoading = false;
+			meetings = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+		} catch (error) { console.error(error); } 
+		finally { isLoading = false; }
+	}
+
+	// [추가] 활성 이벤트 불러오기
+	async function fetchActiveEvents() {
+		try {
+			const today = getLocalTodayString();
+			// Firestore 쿼리 단순화: 전체 최신순 로드 후 필터링
+			const q = query(collection(db, 'events'), orderBy('createdAt', 'desc'));
+			const snapshot = await getDocs(q);
+			const allEvents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+			
+			// 날짜 필터링 (시작일 <= 오늘 <= 종료일)
+			activeEvents = allEvents.filter(e => e.startDate <= today && e.endDate >= today);
+		} catch (error) { console.error("이벤트 로딩 실패", error); }
+	}
+
+	// [추가] 슬라이더 초기화 시 API 바인딩 및 오토플레이 시작
+	function onEventInit(event) {
+		eventEmblaApi = event.detail;
+		startAutoplay();
+	}
+
+	function startAutoplay() {
+		if (activeEvents.length > 1) {
+			autoplayInterval = setInterval(() => {
+				if (eventEmblaApi) eventEmblaApi.scrollNext();
+			}, 5000);
 		}
 	}
 
 	async function checkAndShowBanner() {
-		// [수정] UTC 대신 로컬 시간 사용
 		const todayDate = getLocalTodayString();
 		const hideDate = localStorage.getItem('hideBanner_date');
-
-		if (hideDate === todayDate) {
-			return;
-		}
+		if (hideDate === todayDate) return;
 
 		try {
 			const q = query(collection(db, 'banners'), orderBy('createdAt', 'desc'));
 			const snapshot = await getDocs(q);
 			const banners = snapshot.docs.map(doc => doc.data());
-			
-			// 오늘 날짜가 시작일과 같거나 크고, 종료일과 같거나 작을 때 (포함 관계)
-			const validBanner = banners.find(b => {
-				return b.startDate <= todayDate && b.endDate >= todayDate;
-			});
+			const validBanner = banners.find(b => b.startDate <= todayDate && b.endDate >= todayDate);
 
 			if (validBanner) {
 				activeBanner = validBanner;
 				showBannerModal = true;
 			}
-		} catch (error) {
-			console.error("배너 로딩 실패:", error);
-		}
+		} catch (error) { console.error(error); }
 	}
 
 	function closeBanner() {
 		if (dontShowChecked) {
-			// [수정] 저장할 때도 로컬 시간 사용
 			const todayDate = getLocalTodayString();
 			localStorage.setItem('hideBanner_date', todayDate);
 		}
 		showBannerModal = false;
 	}
 
-	// --- 지도 관련 로직 (기존과 동일) ---
+	// --- 지도 로직 (생략 없이 유지) ---
 	let mapElement;
 	let map;
-
 	function addMarkerFromAddress(meeting) {
 		if (!window.naver || !map) return;
-		window.naver.maps.Service.geocode(
-			{ query: meeting.location },
-			function (status, response) {
-				if (status !== window.naver.maps.Service.Status.OK) return;
-				const result = response.v2;
-				const items = result.addresses;
-				if (items.length > 0) {
-					const x = parseFloat(items[0].x);
-					const y = parseFloat(items[0].y);
-					const position = new window.naver.maps.LatLng(y, x);
-					new window.naver.maps.Marker({ position, map, title: meeting.title });
-				}
-			}
-		);
+		window.naver.maps.Service.geocode({ query: meeting.location }, (status, response) => {
+			if (status !== window.naver.maps.Service.Status.OK) return;
+			const item = response.v2.addresses[0];
+			const pos = new window.naver.maps.LatLng(item.y, item.x);
+			new window.naver.maps.Marker({ position: pos, map, title: meeting.title });
+		});
 	}
-
 	function createMap(centerLat, centerLng, isMyLocation) {
 		if (!mapElement || !window.naver) return;
 		const center = new window.naver.maps.LatLng(centerLat, centerLng);
-		const mapOptions = {
+		map = new window.naver.maps.Map(mapElement, {
 			center, zoom: 14, minZoom: 6, scaleControl: false, logoControl: false, mapDataControl: false,
 			zoomControl: true, zoomControlOptions: { position: window.naver.maps.Position.TOP_RIGHT }
-		};
-		map = new window.naver.maps.Map(mapElement, mapOptions);
-		
+		});
 		if (isMyLocation) {
 			new window.naver.maps.Marker({
 				position: center, map, title: '내 위치', zIndex: 100,
-				icon: { content: `<div style="width: 20px; height: 20px; background: #4285F4; border: 3px solid white; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,0.3);"></div>`, anchor: new window.naver.maps.Point(10, 10) }
+				icon: { content: `<div style="width:20px;height:20px;background:#4285F4;border:3px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,0.3);"></div>` }
 			});
 		}
-		meetings.forEach(meeting => addMarkerFromAddress(meeting));
+		meetings.forEach(m => addMarkerFromAddress(m));
 	}
-
 	function startMapInitialization() {
-		const defaultLat = 37.5665;
-		const defaultLng = 126.9780;
+		const defLat = 37.5665, defLng = 126.9780;
 		if (navigator.geolocation) {
 			navigator.geolocation.getCurrentPosition(
-				(position) => createMap(position.coords.latitude, position.coords.longitude, true),
-				(error) => createMap(defaultLat, defaultLng, false),
+				p => createMap(p.coords.latitude, p.coords.longitude, true),
+				() => createMap(defLat, defLng, false),
 				{ enableHighAccuracy: true, timeout: 5000 }
 			);
-		} else {
-			createMap(defaultLat, defaultLng, false);
-		}
+		} else createMap(defLat, defLng, false);
 	}
 
 	function getRemainingTime(targetDateStr) {
-		const target = new Date(targetDateStr);
-		const current = new Date();
-		const diff = target - current;
+		const diff = new Date(targetDateStr) - new Date();
 		if (diff <= 0) return '마감됨';
 		const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 		const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-		if (days === 0) return `${hours}시간 남음`;
-		return `${days}일 ${hours}시간 남음`;
+		return days === 0 ? `${hours}시간 남음` : `${days}일 ${hours}시간 남음`;
 	}
 
 	onMount(async () => {
 		await fetchMeetings();
+		fetchActiveEvents(); // [추가] 이벤트 로드
 		checkAndShowBanner();
 
 		const interval = setInterval(() => {
-			if (window.naver && window.naver.maps && window.naver.maps.Service) {
+			if (window.naver && window.naver.maps?.Service) {
 				clearInterval(interval);
 				startMapInitialization();
 			}
 		}, 100);
 		return () => clearInterval(interval);
+	});
+
+	onDestroy(() => {
+		if (autoplayInterval) clearInterval(autoplayInterval);
 	});
 </script>
 
@@ -174,6 +177,29 @@
 </svelte:head>
 
 <div class="page-container">
+	{#if activeEvents.length > 0}
+		<div class="event-section">
+			<div class="embla event-slider" 
+				use:emblaCarouselSvelte={{ options: eventEmblaOptions, plugins: [] }}
+				on:emblaInit={onEventInit}
+			>
+				<div class="embla__container">
+					{#each activeEvents as event}
+						<div class="embla__slide event-slide">
+							<a href="/events/{event.id}" class="event-card">
+								<img src={event.image} alt={event.title} />
+								<div class="event-overlay">
+									<span class="event-badge">진행중</span>
+									<h3 class="event-title">{event.title}</h3>
+								</div>
+							</a>
+						</div>
+					{/each}
+				</div>
+			</div>
+		</div>
+	{/if}
+
 	<section class="section">
 		<h2 class="section-title">새로 개설된 모임 👋</h2>
 		<p class="section-desc">관심 있는 주제의 대화에 참여해보세요.</p>
@@ -229,9 +255,7 @@
 					<input type="checkbox" bind:checked={dontShowChecked} />
 					<span>오늘 하루 보지 않기</span>
 				</label>
-				<button class="close-btn" on:click={closeBanner}>
-					닫기 <X size={16} />
-				</button>
+				<button class="close-btn" on:click={closeBanner}>닫기 <X size={16} /></button>
 			</div>
 		</div>
 	</div>
@@ -244,7 +268,26 @@
 	.section-desc { font-size: 14px; color: #666; margin: 0 0 16px 16px; }
 	.loading-box, .empty-box { text-align: center; padding: 40px; color: #999; font-size: 14px; }
 
-	/* 슬라이더 & 카드 */
+	/* [추가] 이벤트 슬라이더 스타일 */
+	.event-section { margin-bottom: 32px; }
+	.event-slider { overflow: hidden; }
+	.event-slide { flex: 0 0 100%; padding: 0 16px; box-sizing: border-box; }
+	.event-card {
+		display: block; position: relative; width: 100%; height: 200px;
+		border-radius: 16px; overflow: hidden; text-decoration: none;
+		box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+	}
+	.event-card img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s; }
+	.event-card:active img { transform: scale(1.02); }
+	.event-overlay {
+		position: absolute; bottom: 0; left: 0; right: 0;
+		background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+		padding: 20px; color: white;
+	}
+	.event-badge { background: #e53e3e; font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-bottom: 4px; display: inline-block; }
+	.event-title { margin: 0; font-size: 18px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+
+	/* 모임 슬라이더 & 카드 (기존) */
 	.embla { overflow: hidden; }
 	.embla__container { display: flex; gap: 16px; padding: 0 16px; }
 	.embla__slide { flex: 0 0 80%; min-width: 0; }
@@ -261,27 +304,13 @@
 	.map-wrapper { padding: 0 16px; }
 	.map-container { width: 100%; height: 300px; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); background-color: #f0f0f0; touch-action: none; }
 
-	/* 배너 모달 스타일 */
-	.banner-overlay {
-		position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-		background-color: rgba(0, 0, 0, 0.6); z-index: 2000;
-		display: flex; align-items: center; justify-content: center;
-		padding: 20px;
-	}
-	.banner-modal {
-		width: 100%; max-width: 360px;
-		background-color: white; border-radius: 16px; overflow: hidden;
-		box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
-		display: flex; flex-direction: column;
-	}
+	/* 배너 모달 */
+	.banner-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.6); z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+	.banner-modal { width: 100%; max-width: 360px; background-color: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; }
 	.banner-body { width: 100%; background-color: #fff; }
 	.banner-link { display: block; font-size: 0; }
 	.banner-body img { width: 100%; height: auto; object-fit: contain; display: block; }
-	.banner-footer {
-		height: 50px; background-color: #1a1a1a; color: white;
-		display: flex; justify-content: space-between; align-items: center;
-		padding: 0 16px; font-size: 13px;
-	}
+	.banner-footer { height: 50px; background-color: #1a1a1a; color: white; display: flex; justify-content: space-between; align-items: center; padding: 0 16px; font-size: 13px; }
 	.checkbox-label { display: flex; align-items: center; gap: 8px; cursor: pointer; color: #ccc; }
 	.checkbox-label input { accent-color: #fff; cursor: pointer; }
 	.close-btn { background: none; border: none; color: white; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 4px; font-size: 14px; }
