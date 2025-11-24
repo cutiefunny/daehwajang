@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { db } from '$lib/firebase';
 	import { 
-		collection, getDocs, query, orderBy, addDoc, deleteDoc, doc, serverTimestamp 
+		collection, getDocs, query, orderBy, addDoc, deleteDoc, doc, serverTimestamp, updateDoc 
 	} from 'firebase/firestore';
 	import { 
 		Search, Plus, Trash2, Calendar, Image as ImageIcon, X, Link as LinkIcon, ChevronLeft, ChevronRight
@@ -20,9 +20,11 @@
 	// 모달 상태
 	let isModalOpen = false;
 	let isSubmitting = false;
+	let isEditMode = false; // true: 수정, false: 등록
 
-	// 새 배너 폼 데이터
-	let newBanner = {
+	// 폼 데이터 (생성/수정 공용)
+	let formData = {
+		id: null,
 		link: '',
 		startDate: '',
 		endDate: '',
@@ -47,35 +49,62 @@
 		}
 	}
 
-	// 모달 열기/닫기
-	function openModal() {
-		newBanner = { link: '', startDate: '', endDate: '', image: '' };
+	// 등록 모달 열기
+	function openCreateModal() {
+		isEditMode = false;
+		formData = { id: null, link: '', startDate: '', endDate: '', image: '' };
 		isModalOpen = true;
 	}
+
+	// 수정 모달 열기
+	function openEditModal(banner) {
+		isEditMode = true;
+		formData = { ...banner }; // 데이터 복사
+		isModalOpen = true;
+	}
+
 	function closeModal() {
 		isModalOpen = false;
 	}
 
-	// 배너 등록 (Firestore 저장)
-	async function submitBanner() {
-		if (!newBanner.image || !newBanner.startDate || !newBanner.endDate) {
+	// 배너 저장 (등록 또는 수정)
+	async function submitForm() {
+		if (!formData.image || !formData.startDate || !formData.endDate) {
 			return alert('이미지와 기간은 필수입니다.');
 		}
 
 		isSubmitting = true;
 		try {
-			await addDoc(collection(db, 'banners'), {
-				...newBanner,
-				createdAt: serverTimestamp(), // 게시일 (서버 시간)
-				postedAt: new Date().toISOString() // 화면 표시용 (로컬 시간)
-			});
-			
-			alert('배너가 등록되었습니다.');
+			if (isEditMode) {
+				// 수정 로직
+				const bannerRef = doc(db, 'banners', formData.id);
+				await updateDoc(bannerRef, {
+					link: formData.link,
+					startDate: formData.startDate,
+					endDate: formData.endDate,
+					image: formData.image
+				});
+
+				// 로컬 목록 업데이트
+				banners = banners.map(b => b.id === formData.id ? { ...b, ...formData } : b);
+				alert('배너가 수정되었습니다.');
+			} else {
+				// 등록 로직
+				await addDoc(collection(db, 'banners'), {
+					link: formData.link,
+					startDate: formData.startDate,
+					endDate: formData.endDate,
+					image: formData.image,
+					createdAt: serverTimestamp(),
+					postedAt: new Date().toISOString()
+				});
+				alert('배너가 등록되었습니다.');
+				fetchBanners(); // 목록 새로고침
+			}
 			closeModal();
-			fetchBanners(); // 목록 갱신
 		} catch (error) {
-			console.error("등록 실패:", error);
-			alert("등록 중 오류가 발생했습니다.");
+			console.error("저장 실패:", error);
+			alert("저장 중 오류가 발생했습니다.");
 		} finally {
 			isSubmitting = false;
 		}
@@ -93,14 +122,13 @@
 		}
 	}
 
-	// 날짜 포맷팅 (YYYY.MM.DD)
 	function formatDate(isoString) {
 		if (!isoString) return '-';
 		return new Date(isoString).toLocaleDateString('ko-KR');
 	}
 
-	// 검색 (링크 URL로 검색) 및 페이지네이션
-	$: filteredBanners = banners.filter(b => b.link.toLowerCase().includes(searchTerm.toLowerCase()));
+	// 검색 및 페이지네이션
+	$: filteredBanners = banners.filter(b => b.link?.toLowerCase().includes(searchTerm.toLowerCase()));
 	$: if (searchTerm) currentPage = 1;
 	$: totalPages = Math.ceil(filteredBanners.length / itemsPerPage);
 	$: paginatedBanners = filteredBanners.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -121,7 +149,7 @@
 			<Search size={18} color="#718096" />
 			<input type="text" placeholder="링크 URL 검색" bind:value={searchTerm} />
 		</div>
-		<button class="create-btn" on:click={openModal}>
+		<button class="create-btn" on:click={openCreateModal}>
 			<Plus size={18} /> 배너 작성
 		</button>
 	</div>
@@ -144,7 +172,7 @@
 			<tbody>
 				{#if paginatedBanners.length > 0}
 					{#each paginatedBanners as banner}
-						<tr>
+						<tr on:click={() => openEditModal(banner)} class="clickable-row">
 							<td>
 								<div class="banner-thumb">
 									{#if banner.image}
@@ -156,7 +184,12 @@
 							</td>
 							<td class="link-cell">
 								{#if banner.link}
-									<a href={banner.link} target="_blank" class="link-text">
+									<a 
+										href={banner.link} 
+										target="_blank" 
+										class="link-text"
+										on:click|stopPropagation
+									>
 										<LinkIcon size={12} /> {banner.link}
 									</a>
 								{:else}
@@ -170,7 +203,10 @@
 								</div>
 							</td>
 							<td>
-								<button class="icon-btn delete" on:click={() => deleteBanner(banner.id)}>
+								<button 
+									class="icon-btn delete" 
+									on:click|stopPropagation={() => deleteBanner(banner.id)}
+								>
 									<Trash2 size={16} />
 								</button>
 							</td>
@@ -200,7 +236,7 @@
 	<div class="modal-overlay" on:click={closeModal}>
 		<div class="modal-content" on:click|stopPropagation>
 			<div class="modal-header">
-				<h3>새 배너 작성</h3>
+				<h3>{isEditMode ? '배너 수정' : '새 배너 작성'}</h3>
 				<button class="close-btn" on:click={closeModal}><X size={20} /></button>
 			</div>
 			
@@ -210,32 +246,33 @@
 					<div style="height: 180px;">
 						<ImageUploader 
 							path="banners" 
-							bind:imageUrl={newBanner.image} 
+							bind:imageUrl={formData.image} 
+							objectFit="cover"
 						/>
 					</div>
 				</div>
 
 				<div class="form-group">
 					<label for="link">링크 URL</label>
-					<input type="text" id="link" bind:value={newBanner.link} placeholder="예: https://google.com" />
+					<input type="text" id="link" bind:value={formData.link} placeholder="예: https://google.com" />
 				</div>
 
 				<div class="form-row">
 					<div class="form-group">
 						<label for="startDate">시작일</label>
-						<input type="date" id="startDate" bind:value={newBanner.startDate} />
+						<input type="date" id="startDate" bind:value={formData.startDate} />
 					</div>
 					<div class="form-group">
 						<label for="endDate">종료일</label>
-						<input type="date" id="endDate" bind:value={newBanner.endDate} />
+						<input type="date" id="endDate" bind:value={formData.endDate} />
 					</div>
 				</div>
 			</div>
 
 			<div class="modal-footer">
 				<button class="cancel-btn" on:click={closeModal}>취소</button>
-				<button class="submit-btn" on:click={submitBanner} disabled={isSubmitting}>
-					{isSubmitting ? '저장 중...' : '등록하기'}
+				<button class="submit-btn" on:click={submitForm} disabled={isSubmitting}>
+					{isSubmitting ? '저장 중...' : (isEditMode ? '수정 완료' : '등록하기')}
 				</button>
 			</div>
 		</div>
@@ -257,7 +294,11 @@
 	table { width: 100%; border-collapse: collapse; min-width: 800px; }
 	th { text-align: left; padding: 16px 24px; background-color: #f7fafc; color: #718096; font-size: 12px; font-weight: 600; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; }
 	td { padding: 16px 24px; border-bottom: 1px solid #edf2f7; vertical-align: middle; font-size: 14px; color: #4a5568; }
-	tr:hover { background-color: #fafafa; }
+	tr:last-child td { border-bottom: none; }
+	
+	/* 클릭 가능한 행 스타일 */
+	.clickable-row { cursor: pointer; transition: background 0.1s; }
+	.clickable-row:hover { background-color: #f0f4f8; }
 
 	.banner-thumb { width: 100px; height: 50px; border-radius: 6px; overflow: hidden; background-color: #edf2f7; display: flex; align-items: center; justify-content: center; }
 	.banner-thumb img { width: 100%; height: 100%; object-fit: cover; }
