@@ -1,47 +1,92 @@
 <script>
+	import { onMount, onDestroy } from 'svelte';
+	import { user } from '$lib/stores';
+	import { db } from '$lib/firebase';
+	import { 
+		collection, 
+		query, 
+		where, 
+		orderBy, 
+		onSnapshot, 
+		addDoc, 
+		serverTimestamp 
+	} from 'firebase/firestore';
 	import { Plus, Users, MessageCircle } from 'lucide-svelte';
 
-	// 임시 데이터: 내가 개설한 채팅방 목록
-	let myChatRooms = [
-		{
-			id: 1,
-			title: '주말 독서의 장 📚',
-			lastMessage: '이번 주 모임 장소 예약 완료했습니다! 공지 확인해주세요.',
-			timestamp: '방금 전',
-			unreadCount: 2,
-			participantCount: 8,
-			image: '/images/book.png'
-		},
-		{
-			id: 2,
-			title: '신천 러닝 크루 🏃',
-			lastMessage: '오늘 비 오는데 러닝 진행하나요?',
-			timestamp: '오전 10:30',
-			unreadCount: 0,
-			participantCount: 15,
-			image: '/images/run.png'
-		},
-		{
-			id: 3,
-			title: '사이드 프로젝트 팀 (디자인/개발)',
-			lastMessage: '개발자님, 피그마 시안 확인 부탁드려요~',
-			timestamp: '어제',
-			unreadCount: 5,
-			participantCount: 4,
-			image: 'https://placehold.co/100x100/333/fff?text=P'
+	let chatRooms = [];
+	let unsubscribe = null;
+
+	// 채팅방 목록 실시간 구독
+	// (실제 앱에서는 'participants' 배열에 내 ID가 있는 방만 가져오는 것이 좋음)
+	function subscribeToChatRooms() {
+		const q = query(
+			collection(db, 'chatRooms'),
+			orderBy('timestamp', 'desc') // 최신 대화가 오간 순서대로 정렬
+		);
+
+		unsubscribe = onSnapshot(q, (snapshot) => {
+			chatRooms = snapshot.docs.map(doc => ({
+				id: doc.id,
+				...doc.data()
+			}));
+		});
+	}
+
+	onMount(() => {
+		subscribeToChatRooms();
+	});
+
+	onDestroy(() => {
+		if (unsubscribe) unsubscribe();
+	});
+
+	// 새 채팅방 만들기 (간단히 prompt로 제목 입력받기)
+	async function createChatRoom() {
+		if (!$user) return alert('로그인이 필요합니다!');
+		
+		const title = prompt('새로운 채팅방 이름을 입력하세요:', '자유 대화방');
+		if (!title) return;
+
+		try {
+			await addDoc(collection(db, 'chatRooms'), {
+				title: title,
+				hostId: $user.uid,
+				hostName: $user.displayName || '익명',
+				image: '/images/cafe.png', // 기본 이미지
+				lastMessage: '대화가 시작되었습니다.',
+				timestamp: serverTimestamp(),
+				participantCount: 1,
+				participants: [$user.uid]
+			});
+		} catch (error) {
+			console.error('채팅방 생성 실패:', error);
+			alert('채팅방을 만들지 못했습니다.');
 		}
-	];
+	}
+
+	// 날짜 포맷팅 (예: 방금 전, 10:30, 어제)
+	function formatTime(timestamp) {
+		if (!timestamp) return '';
+		const date = timestamp.toDate();
+		const now = new Date();
+		const diff = (now - date) / 1000; // 초 단위
+
+		if (diff < 60) return '방금 전';
+		if (diff < 60 * 60) return `${Math.floor(diff / 60)}분 전`;
+		if (diff < 60 * 60 * 24) return date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+		return date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+	}
 </script>
 
 <div class="page-container">
 	<div class="header-row">
 		<h2 class="page-title">대화</h2>
-		<span class="room-count">개설 {myChatRooms.length}</span>
+		<span class="room-count">개설 {chatRooms.length}</span>
 	</div>
 
 	<div class="chat-list">
-		{#if myChatRooms.length > 0}
-			{#each myChatRooms as room}
+		{#if chatRooms.length > 0}
+			{#each chatRooms as room (room.id)}
 				<a href="/chat/{room.id}" class="chat-item">
 					<div class="image-wrapper">
 						<img src={room.image} alt={room.title} />
@@ -49,22 +94,21 @@
 					<div class="content">
 						<div class="top-row">
 							<h3 class="title">{room.title}</h3>
-							<span class="time">{room.timestamp}</span>
+							<span class="time">{formatTime(room.timestamp)}</span>
 						</div>
 						<div class="bottom-row">
 							<p class="message">{room.lastMessage}</p>
-							{#if room.unreadCount > 0}
-								<span class="unread-badge">{room.unreadCount}</span>
-							{/if}
-						</div>
+							</div>
 						<div class="meta-row">
 							<div class="meta-item">
 								<Users size={12} />
 								<span>{room.participantCount}명</span>
 							</div>
-							<div class="meta-item host-badge">
-								<span>HOST</span>
-							</div>
+							{#if room.hostId === $user?.uid}
+								<div class="meta-item host-badge">
+									<span>HOST</span>
+								</div>
+							{/if}
 						</div>
 					</div>
 				</a>
@@ -77,7 +121,7 @@
 		{/if}
 	</div>
 
-	<button class="fab" aria-label="새 대화방 개설">
+	<button class="fab" aria-label="새 대화방 개설" on:click={createChatRoom}>
 		<Plus size={24} />
 	</button>
 </div>
@@ -86,7 +130,8 @@
 	.page-container {
 		padding: 20px 16px;
 		position: relative;
-		min-height: 100%; /* FAB 위치 잡기 위해 */
+		min-height: 100%;
+		padding-bottom: 80px; /* FAB 공간 확보 */
 	}
 
 	.header-row {
@@ -108,7 +153,6 @@
 		font-weight: 500;
 	}
 
-	/* 채팅 리스트 스타일 */
 	.chat-list {
 		display: flex;
 		flex-direction: column;
@@ -120,12 +164,10 @@
 		gap: 12px;
 		text-decoration: none;
 		color: inherit;
-		background-color: white; /* 터치 시 하이라이트 효과 등을 위해 배경 지정 권장 */
+		background-color: white;
 	}
 
-	.chat-item:active {
-		opacity: 0.7;
-	}
+	.chat-item:active { opacity: 0.7; }
 
 	.image-wrapper {
 		width: 56px;
@@ -148,15 +190,12 @@
 		display: flex;
 		flex-direction: column;
 		justify-content: center;
-		min-width: 0; /* 텍스트 말줄임 처리를 위해 필수 */
+		min-width: 0;
 		padding-bottom: 12px;
 		border-bottom: 1px solid #f5f5f5;
 	}
 
-	/* 마지막 아이템은 선 없애기 */
-	.chat-item:last-child .content {
-		border-bottom: none;
-	}
+	.chat-item:last-child .content { border-bottom: none; }
 
 	.top-row {
 		display: flex;
@@ -200,20 +239,6 @@
 		margin-right: 8px;
 	}
 
-	.unread-badge {
-		background-color: #ff3b30;
-		color: white;
-		font-size: 10px;
-		font-weight: bold;
-		min-width: 18px;
-		height: 18px;
-		border-radius: 9px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding: 0 4px;
-	}
-
 	.meta-row {
 		display: flex;
 		align-items: center;
@@ -254,10 +279,9 @@
 		line-height: 1.5;
 	}
 
-	/* 플로팅 버튼 (FAB) */
 	.fab {
 		position: fixed;
-		bottom: 80px; /* 탭바 높이 고려 */
+		bottom: 80px;
 		right: 20px;
 		width: 56px;
 		height: 56px;
@@ -274,7 +298,5 @@
 		transition: transform 0.2s;
 	}
 
-	.fab:active {
-		transform: scale(0.95);
-	}
+	.fab:active { transform: scale(0.95); }
 </style>

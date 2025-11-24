@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import emblaCarouselSvelte from 'embla-carousel-svelte';
 	import { db } from '$lib/firebase';
-	import { collection, getDocs, query, orderBy, where } from 'firebase/firestore'; // where 추가
+	import { collection, getDocs, query, orderBy, where, limit } from 'firebase/firestore'; // limit 추가
+	import { appSettings } from '$lib/stores';
 
 	const NAVER_CLIENT_ID = import.meta.env.VITE_NAVER_MAPS_CLIENT_ID;
 	let emblaOptions = { loop: false, align: 'start', containScroll: 'trimSnaps' };
@@ -24,6 +25,11 @@
 		return `${days}일 ${hours}시간 남음`;
 	}
 
+	// 설정값이 로드되거나 변경되면 fetchMeetings 재실행
+	$: if ($appSettings.sliderLimit) {
+		fetchMeetings();
+	}
+
 	// Firestore에서 데이터 불러오기 (쿼리 수정됨)
 	async function fetchMeetings() {
 		try {
@@ -35,7 +41,8 @@
 			const q = query(
 				collection(db, 'meetings'), 
 				where('date', '>=', now), 
-				orderBy('date', 'asc')
+				orderBy('date', 'asc'),
+                limit($appSettings.sliderLimit) 
 			);
 			
 			const querySnapshot = await getDocs(q);

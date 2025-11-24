@@ -1,44 +1,87 @@
 <script>
-	import { onMount, tick, afterUpdate } from 'svelte';
+	import { onMount, onDestroy, tick, afterUpdate } from 'svelte';
 	import { page } from '$app/stores';
+	import { user } from '$lib/stores';
+	import { db } from '$lib/firebase';
+	import { 
+		collection, 
+		query, 
+		orderBy, 
+		onSnapshot, 
+		addDoc, 
+		serverTimestamp, 
+		doc, 
+		updateDoc,
+		getDoc 
+	} from 'firebase/firestore';
 	import { Send, MoreVertical, Phone, ArrowLeft } from 'lucide-svelte';
 
-	// URL에서 채팅방 ID 가져오기
-	let roomId = $page.params.id;
-
-	// 채팅방 이름
-	let roomTitle = roomId === '1' ? '주말 독서의 장 📚' : '새로운 대화방';
-
+	const roomId = $page.params.id;
+	let roomTitle = '로딩 중...';
+	let messages = [];
+	let newMessage = '';
 	let scrollContainer;
 	let inputElement;
-	let newMessage = '';
+	let unsubscribe = null;
 
-	// 임시 메시지 데이터
-	let messages = [
-		{ id: 1, sender: 'other', text: '안녕하세요! 이번 주 모임 장소 정해졌나요?', time: '오후 2:01' },
-		{ id: 2, sender: 'me', text: '네, 강남역 근처 카페로 예약했습니다.', time: '오후 2:03' },
-		{ id: 3, sender: 'me', text: '지도 링크 보내드릴게요.', time: '오후 2:03' },
-		{ id: 4, sender: 'other', text: '오 좋습니다! 시간은 그대로 2시인가요?', time: '오후 2:05' },
-		{ id: 5, sender: 'me', text: '네 맞습니다. 늦지 않게 오세요~', time: '오후 2:06' },
-		{ id: 6, sender: 'other', text: '알겠습니다. 그때 뵙겠습니다! ㅎㅎ', time: '오후 2:10' }
-	];
+	// 1. 채팅방 정보 가져오기 (타이틀용)
+	async function fetchRoomInfo() {
+		const docRef = doc(db, 'chatRooms', roomId);
+		const docSnap = await getDoc(docRef);
+		if (docSnap.exists()) {
+			roomTitle = docSnap.data().title;
+		} else {
+			roomTitle = '존재하지 않는 방';
+		}
+	}
 
+	// 2. 메시지 실시간 구독
+	function subscribeToMessages() {
+		const q = query(
+			collection(db, 'chatRooms', roomId, 'messages'),
+			orderBy('createdAt', 'asc')
+		);
+
+		unsubscribe = onSnapshot(q, (snapshot) => {
+			messages = snapshot.docs.map(doc => ({
+				id: doc.id,
+				...doc.data()
+			}));
+			// 메시지가 오면 스크롤을 아래로
+			tick().then(() => scrollToBottom());
+		});
+	}
+
+	// 3. 메시지 전송
 	async function sendMessage() {
-		if (!newMessage.trim()) return;
+		if (!newMessage.trim() || !$user) return;
 
-		const msg = {
-			id: Date.now(),
-			sender: 'me',
-			text: newMessage,
-			time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
-		};
+		const text = newMessage;
+		newMessage = ''; // 입력창 즉시 비우기
 
-		messages = [...messages, msg];
-		newMessage = '';
+		try {
+			// 서브 컬렉션에 메시지 추가
+			await addDoc(collection(db, 'chatRooms', roomId, 'messages'), {
+				text: text,
+				senderId: $user.uid,
+				senderName: $user.displayName || '익명',
+				senderImage: $user.photoURL,
+				createdAt: serverTimestamp()
+			});
 
-		await tick();
-		scrollToBottom();
-		inputElement.focus();
+			// 채팅방 목록에 표시될 '마지막 메시지' 업데이트
+			const roomRef = doc(db, 'chatRooms', roomId);
+			await updateDoc(roomRef, {
+				lastMessage: text,
+				timestamp: serverTimestamp()
+			});
+
+			scrollToBottom();
+			inputElement.focus();
+		} catch (error) {
+			console.error('메시지 전송 실패:', error);
+			alert('전송에 실패했습니다.');
+		}
 	}
 
 	function scrollToBottom() {
@@ -47,15 +90,21 @@
 		}
 	}
 
+	function formatTime(timestamp) {
+		if (!timestamp) return '';
+		// Firestore Timestamp는 toDate() 메서드를 가짐
+		return timestamp.toDate().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+	}
+
 	onMount(() => {
-		scrollToBottom();
+		fetchRoomInfo();
+		subscribeToMessages();
 	});
 
-	afterUpdate(() => {
-		scrollToBottom();
+	onDestroy(() => {
+		if (unsubscribe) unsubscribe();
 	});
 
-	// 뒤로가기
 	function goBack() {
 		history.back();
 	}
@@ -74,23 +123,23 @@
 	</div>
 
 	<div class="message-list" bind:this={scrollContainer}>
-		<div class="date-divider">2025년 11월 24일 월요일</div>
+		<div class="date-divider">오늘</div>
 		
 		{#each messages as msg (msg.id)}
-			<div class="message-row {msg.sender === 'me' ? 'my-msg' : 'other-msg'}">
-				{#if msg.sender === 'other'}
+			<div class="message-row {msg.senderId === $user?.uid ? 'my-msg' : 'other-msg'}">
+				{#if msg.senderId !== $user?.uid}
 					<div class="profile-pic">
-						<img src="https://placehold.co/100x100/orange/white?text=U" alt="User" />
+						<img src={msg.senderImage || "https://placehold.co/100x100/orange/white?text=U"} alt="User" />
 					</div>
 				{/if}
 				
 				<div class="message-content">
-					{#if msg.sender === 'other'}
-						<span class="sender-name">상대방</span>
+					{#if msg.senderId !== $user?.uid}
+						<span class="sender-name">{msg.senderName}</span>
 					{/if}
 					<div class="bubble-wrapper">
 						<div class="bubble">{msg.text}</div>
-						<span class="time">{msg.time}</span>
+						<span class="time">{formatTime(msg.createdAt)}</span>
 					</div>
 				</div>
 			</div>
@@ -132,9 +181,7 @@
 		flex-shrink: 0;
 	}
 
-	.back-btn {
-		margin-right: 8px;
-	}
+	.back-btn { margin-right: 8px; }
 
 	.room-name {
 		font-size: 14px;
@@ -145,9 +192,7 @@
 		text-overflow: ellipsis;
 	}
 
-	.actions {
-		display: flex;
-	}
+	.actions { display: flex; }
 
 	.icon-btn {
 		background: none;
@@ -160,7 +205,7 @@
 		justify-content: center;
 	}
 
-	/* 메시지 리스트: 남은 공간을 모두 차지하며 스크롤 생성 */
+	/* 메시지 리스트 */
 	.message-list {
 		flex: 1;
 		overflow-y: auto;
@@ -192,9 +237,7 @@
 		flex-direction: row-reverse;
 	}
 
-	.my-msg .bubble-wrapper {
-		flex-direction: row-reverse;
-	}
+	.my-msg .bubble-wrapper { flex-direction: row-reverse; }
 
 	.my-msg .bubble {
 		background-color: #feec34;
@@ -202,13 +245,9 @@
 		border-top-right-radius: 0;
 	}
 
-	.my-msg .time {
-		text-align: right;
-	}
+	.my-msg .time { text-align: right; }
 
-	.other-msg {
-		align-self: flex-start;
-	}
+	.other-msg { align-self: flex-start; }
 
 	.other-msg .bubble {
 		background-color: #fff;
@@ -273,7 +312,7 @@
 		align-items: center;
 		gap: 8px;
 		border-top: 1px solid #eee;
-		flex-shrink: 0; /* 찌그러짐 방지 */
+		flex-shrink: 0;
 	}
 
 	.input-area input {
