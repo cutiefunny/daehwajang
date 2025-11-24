@@ -1,5 +1,6 @@
 <script>
-	import { onMount, onDestroy } from 'svelte'; // onDestroy 추가
+	import { onMount, onDestroy } from 'svelte';
+	import { goto } from '$app/navigation'; // [추가] 페이지 이동 함수
 	import emblaCarouselSvelte from 'embla-carousel-svelte';
 	import { db } from '$lib/firebase';
 	import { collection, getDocs, query, orderBy, where, limit } from 'firebase/firestore';
@@ -7,11 +8,9 @@
 	import { X } from 'lucide-svelte';
 
 	const NAVER_CLIENT_ID = import.meta.env.VITE_NAVER_MAPS_CLIENT_ID;
-	
 	// 모임 슬라이더 옵션
 	let emblaOptions = { loop: false, align: 'start', containScroll: 'trimSnaps' };
-	
-	// [추가] 이벤트 슬라이더 관련 변수
+	// 이벤트 슬라이더 관련 변수
 	let eventEmblaApi;
 	let eventEmblaOptions = { loop: true, align: 'center' };
 	let activeEvents = [];
@@ -49,25 +48,23 @@
 			);
 			const querySnapshot = await getDocs(q);
 			meetings = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-		} catch (error) { console.error(error); } 
+		} catch (error) { console.error(error);
+		} 
 		finally { isLoading = false; }
 	}
 
-	// [추가] 활성 이벤트 불러오기
+	// 활성 이벤트 불러오기
 	async function fetchActiveEvents() {
 		try {
 			const today = getLocalTodayString();
-			// Firestore 쿼리 단순화: 전체 최신순 로드 후 필터링
 			const q = query(collection(db, 'events'), orderBy('createdAt', 'desc'));
 			const snapshot = await getDocs(q);
 			const allEvents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-			
-			// 날짜 필터링 (시작일 <= 오늘 <= 종료일)
 			activeEvents = allEvents.filter(e => e.startDate <= today && e.endDate >= today);
 		} catch (error) { console.error("이벤트 로딩 실패", error); }
 	}
 
-	// [추가] 슬라이더 초기화 시 API 바인딩 및 오토플레이 시작
+	// 슬라이더 초기화 시 API 바인딩 및 오토플레이 시작
 	function onEventInit(event) {
 		eventEmblaApi = event.detail;
 		startAutoplay();
@@ -85,7 +82,6 @@
 		const todayDate = getLocalTodayString();
 		const hideDate = localStorage.getItem('hideBanner_date');
 		if (hideDate === todayDate) return;
-
 		try {
 			const q = query(collection(db, 'banners'), orderBy('createdAt', 'desc'));
 			const snapshot = await getDocs(q);
@@ -107,18 +103,33 @@
 		showBannerModal = false;
 	}
 
-	// --- 지도 로직 (생략 없이 유지) ---
+	// --- 지도 로직 ---
 	let mapElement;
 	let map;
+
 	function addMarkerFromAddress(meeting) {
 		if (!window.naver || !map) return;
 		window.naver.maps.Service.geocode({ query: meeting.location }, (status, response) => {
 			if (status !== window.naver.maps.Service.Status.OK) return;
 			const item = response.v2.addresses[0];
 			const pos = new window.naver.maps.LatLng(item.y, item.x);
-			new window.naver.maps.Marker({ position: pos, map, title: meeting.title });
+			
+			// [수정] 마커 생성 및 클릭 이벤트 추가
+			const marker = new window.naver.maps.Marker({ 
+				position: pos, 
+				map, 
+				title: meeting.title,
+				// 마커에 커서 포인터 스타일 추가 (선택 사항)
+				cursor: 'pointer' 
+			});
+
+			// 마커 클릭 시 상세 페이지 이동
+			window.naver.maps.Event.addListener(marker, 'click', () => {
+				goto(`/meetings/${meeting.id}`);
+			});
 		});
 	}
+
 	function createMap(centerLat, centerLng, isMyLocation) {
 		if (!mapElement || !window.naver) return;
 		const center = new window.naver.maps.LatLng(centerLat, centerLng);
@@ -134,6 +145,7 @@
 		}
 		meetings.forEach(m => addMarkerFromAddress(m));
 	}
+
 	function startMapInitialization() {
 		const defLat = 37.5665, defLng = 126.9780;
 		if (navigator.geolocation) {
@@ -155,7 +167,7 @@
 
 	onMount(async () => {
 		await fetchMeetings();
-		fetchActiveEvents(); // [추가] 이벤트 로드
+		fetchActiveEvents();
 		checkAndShowBanner();
 
 		const interval = setInterval(() => {
@@ -211,7 +223,7 @@
 				<div class="embla__container">
 					{#each meetings as meeting}
 						<div class="embla__slide">
-							<div class="card">
+							<a href="/meetings/{meeting.id}" class="card">
 								<div class="card-image-wrapper">
 									<img src={meeting.image} alt={meeting.title} class="card-image" />
 									<div class="time-badge">{getRemainingTime(meeting.date)}</div>
@@ -221,7 +233,7 @@
 									<h3 class="card-title">{meeting.title}</h3>
 									<p class="card-location">📍 {meeting.location}</p>
 								</div>
-							</div>
+							</a>
 						</div>
 					{/each}
 				</div>
@@ -268,7 +280,7 @@
 	.section-desc { font-size: 14px; color: #666; margin: 0 0 16px 16px; }
 	.loading-box, .empty-box { text-align: center; padding: 40px; color: #999; font-size: 14px; }
 
-	/* [추가] 이벤트 슬라이더 스타일 */
+	/* 이벤트 슬라이더 스타일 */
 	.event-section { margin-bottom: 32px; }
 	.event-slider { overflow: hidden; }
 	.event-slide { flex: 0 0 100%; padding: 0 16px; box-sizing: border-box; }
@@ -287,11 +299,21 @@
 	.event-badge { background: #e53e3e; font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-bottom: 4px; display: inline-block; }
 	.event-title { margin: 0; font-size: 18px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
 
-	/* 모임 슬라이더 & 카드 (기존) */
+	/* 모임 슬라이더 & 카드 */
 	.embla { overflow: hidden; }
 	.embla__container { display: flex; gap: 16px; padding: 0 16px; }
 	.embla__slide { flex: 0 0 80%; min-width: 0; }
-	.card { border-radius: 16px; overflow: hidden; background-color: white; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); height: 260px; display: flex; flex-direction: column; }
+	
+	/* [수정] a 태그 스타일 적용 (기존 div 스타일 유지 + 링크 스타일 제거) */
+	.card { 
+		border-radius: 16px; overflow: hidden; background-color: white;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); height: 260px; display: flex; flex-direction: column;
+		text-decoration: none; /* 링크 밑줄 제거 */
+		color: inherit; /* 텍스트 색상 유지 */
+		transition: transform 0.2s; /* 클릭 효과 추가 */
+	}
+	.card:active { transform: scale(0.98); }
+
 	.card-image-wrapper { position: relative; width: 100%; height: 140px; }
 	.card-image { width: 100%; height: 100%; object-fit: cover; }
 	.time-badge { position: absolute; top: 10px; right: 10px; background-color: rgba(0, 0, 0, 0.6); color: white; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 12px; backdrop-filter: blur(4px); z-index: 10; }

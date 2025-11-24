@@ -1,11 +1,11 @@
 <script>
 	import { onMount } from 'svelte';
 	import { user } from '$lib/stores'; // 로그인된 유저 정보
-	import { db } from '$lib/firebase'; // Firestore
+	import { auth, db } from '$lib/firebase'; // Auth 및 Firestore
+	import { signOut } from 'firebase/auth'; // [추가] 로그아웃 함수
 	import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 	import { goto } from '$app/navigation';
 	import { 
-		User, 
 		Settings, 
 		CreditCard, 
 		Users, 
@@ -13,7 +13,8 @@
 		Camera, 
 		Check, 
 		Edit2,
-		Crown 
+		Crown,
+		LogOut // [추가] 로그아웃 아이콘
 	} from 'lucide-svelte';
 
 	// 프로필 데이터 상태
@@ -54,8 +55,7 @@
 	$: if ($user) {
 		loadUserData($user);
 	} else if (!$user && !isLoading) {
-		// 로그아웃 상태라면 로그인 페이지로
-		// (레이아웃 로딩 속도 고려하여 isLoading 체크)
+		// 로그아웃 상태라면 로그인 페이지로 (레이아웃 로딩 속도 고려하여 isLoading 체크)
 	}
 
 	async function loadUserData(currentUser) {
@@ -115,14 +115,32 @@
 	function changeImage() {
 		alert('프로필 사진 변경 기능은 추후 구현 예정입니다.');
 	}
+
+	// [추가] 로그아웃 함수
+	async function handleLogout() {
+		if (confirm('정말 로그아웃 하시겠습니까?')) {
+			try {
+				await signOut(auth);
+				alert('로그아웃 되었습니다.');
+				goto('/login');
+			} catch (error) {
+				console.error('로그아웃 실패:', error);
+			}
+		}
+	}
 </script>
 
 <div class="page-container">
 	<header class="header">
 		<h2 class="page-title">내 프로필</h2>
-		<button class="icon-btn setting-btn">
-			<Settings size={24} />
-		</button>
+		<div class="header-actions">
+			<button class="icon-btn logout-btn" on:click={handleLogout} title="로그아웃">
+				<LogOut size={22} />
+			</button>
+			<button class="icon-btn setting-btn">
+				<Settings size={22} />
+			</button>
+		</div>
 	</header>
 
 	{#if isLoading}
@@ -245,6 +263,11 @@
 		align-items: center;
 		margin-bottom: 24px;
 	}
+	
+	.header-actions {
+		display: flex;
+		gap: 8px;
+	}
 
 	.page-title {
 		font-size: 22px;
@@ -256,8 +279,18 @@
 		background: none;
 		border: none;
 		cursor: pointer;
-		padding: 4px;
+		padding: 6px;
 		color: #333;
+		border-radius: 50%;
+		transition: background-color 0.2s;
+	}
+	
+	.icon-btn:hover {
+		background-color: #f0f0f0;
+	}
+	
+	.logout-btn {
+		color: #e53e3e; /* 로그아웃은 약간 붉은 계열로 강조 */
 	}
 
 	.loading-state, .empty-state {

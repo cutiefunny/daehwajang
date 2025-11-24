@@ -2,8 +2,11 @@
 	import { onMount } from 'svelte';
 	import { db } from '$lib/firebase';
 	import { collection, getDocs, query, orderBy, doc, deleteDoc } from 'firebase/firestore';
-	import { Search, MapPin, Calendar, Trash2, ChevronLeft, ChevronRight } from 'lucide-svelte';
+	// [추가] Users 아이콘 import
+	import { Search, MapPin, Calendar, Trash2, ChevronLeft, ChevronRight, Users } from 'lucide-svelte';
 	import MeetingEditModal from '$lib/components/admin/MeetingEditModal.svelte';
+	// [추가] 신청자 관리 모달 import
+	import MeetingApplicantsModal from '$lib/components/admin/MeetingApplicantsModal.svelte';
 
 	let meetings = [];
 	let isLoading = true;
@@ -16,13 +19,16 @@
 	// 모달 상태
 	let isModalOpen = false;
 	let selectedMeeting = null;
+	
+	// [추가] 신청자 관리 모달 상태 변수
+	let isApplicantModalOpen = false;
+	let meetingForApplicant = null;
 
 	async function fetchMeetings() {
 		isLoading = true;
 		try {
 			const q = query(collection(db, 'meetings'), orderBy('date', 'desc'));
 			const querySnapshot = await getDocs(q);
-			
 			meetings = querySnapshot.docs.map(doc => {
 				const data = doc.data();
 				return {
@@ -45,16 +51,22 @@
 		return meetingDate > now ? 'upcoming' : 'ended';
 	}
 
-	// 모달 열기
+	// 모달 열기 (정보 수정)
 	function openEditModal(meeting) {
 		selectedMeeting = meeting;
 		isModalOpen = true;
+	}
+	
+	// [추가] 모달 열기 (신청자 관리)
+	function openApplicantModal(meeting) {
+		meetingForApplicant = meeting;
+		isApplicantModalOpen = true;
 	}
 
 	// 저장 후 처리
 	function handleMeetingSaved(e) {
 		const updatedMeeting = e.detail;
-		updatedMeeting.status = getStatus(updatedMeeting.date); // 날짜 변경 시 상태 재계산
+		updatedMeeting.status = getStatus(updatedMeeting.date);
 		meetings = meetings.map(m => m.id === updatedMeeting.id ? updatedMeeting : m);
 		isModalOpen = false;
 		selectedMeeting = null;
@@ -84,7 +96,6 @@
 	$: if (searchTerm) currentPage = 1;
 	$: totalPages = Math.ceil(filteredMeetings.length / itemsPerPage);
 	$: paginatedMeetings = filteredMeetings.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-
 	function goToPage(page) { if (page >= 1 && page <= totalPages) currentPage = page; }
 
 	onMount(() => { fetchMeetings(); });
@@ -144,8 +155,19 @@
 								{#if meeting.status === 'upcoming'} <span class="status-badge upcoming">모집중</span>
 								{:else} <span class="status-badge ended">종료됨</span> {/if}
 							</td>
-							<td>
-								<button class="icon-btn delete" on:click|stopPropagation={() => deleteMeeting(meeting.id)}>
+							<td class="actions-cell">
+								<button 
+									class="icon-btn applicants" 
+									title="신청자 관리"
+									on:click|stopPropagation={() => openApplicantModal(meeting)}
+								>
+									<Users size={16} />
+								</button>
+								<button 
+									class="icon-btn delete" 
+									title="삭제"
+									on:click|stopPropagation={() => deleteMeeting(meeting.id)}
+								>
 									<Trash2 size={16} />
 								</button>
 							</td>
@@ -175,16 +197,27 @@
 	/>
 {/if}
 
+{#if isApplicantModalOpen && meetingForApplicant}
+	<MeetingApplicantsModal
+		meeting={meetingForApplicant}
+		on:close={() => isApplicantModalOpen = false}
+	/>
+{/if}
+
 <style>
+	/* 기존 스타일 유지 */
 	.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
 	h2 { margin: 0; font-size: 24px; color: #2d3748; }
-	.search-box { display: flex; align-items: center; background: white; padding: 8px 16px; border-radius: 8px; border: 1px solid #e2e8f0; gap: 8px; width: 300px; }
+	.search-box { display: flex; align-items: center; background: white; padding: 8px 16px;
+	border-radius: 8px; border: 1px solid #e2e8f0; gap: 8px; width: 300px; }
 	.search-box input { border: none; outline: none; width: 100%; font-size: 14px; }
 
 	.table-container { background: white; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow: hidden; display: flex; flex-direction: column; }
 	table { width: 100%; border-collapse: collapse; min-width: 900px; }
-	th { text-align: left; padding: 16px 24px; background-color: #f7fafc; color: #718096; font-size: 12px; font-weight: 600; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; }
-	td { padding: 16px 24px; border-bottom: 1px solid #edf2f7; vertical-align: middle; font-size: 14px; color: #4a5568; }
+	th { text-align: left; padding: 16px 24px; background-color: #f7fafc; color: #718096;
+	font-size: 12px; font-weight: 600; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; }
+	td { padding: 16px 24px; border-bottom: 1px solid #edf2f7;
+	vertical-align: middle; font-size: 14px; color: #4a5568; }
 	tr:last-child td { border-bottom: none; }
 	.clickable-row { cursor: pointer; transition: background 0.1s; }
 	.clickable-row:hover { background-color: #f0f4f8; }
@@ -206,8 +239,14 @@
 	.status-badge { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
 	.status-badge.upcoming { background-color: #c6f6d5; color: #276749; }
 	.status-badge.ended { background-color: #cbd5e0; color: #4a5568; }
-	.icon-btn { background: none; border: none; cursor: pointer; padding: 6px; border-radius: 4px; transition: background 0.2s; color: #a0aec0; }
+	
+	/* 버튼 그룹 스타일 */
+	.actions-cell { display: flex; gap: 8px; }
+	.icon-btn { background: none; border: none; cursor: pointer; padding: 6px; border-radius: 4px; transition: all 0.2s; color: #a0aec0; }
 	.icon-btn:hover { background-color: #edf2f7; color: #4a5568; }
 	.icon-btn.delete:hover { background-color: #FED7D7; color: #C53030; }
+	/* [추가] 신청자 관리 버튼 스타일 */
+	.icon-btn.applicants:hover { background-color: #E6FFFA; color: #2C7A7B; }
+	
 	.loading, .empty-message { text-align: center; padding: 40px; color: #a0aec0; }
 </style>

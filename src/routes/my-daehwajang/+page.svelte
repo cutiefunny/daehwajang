@@ -1,42 +1,110 @@
 <script>
-	import { Calendar, MapPin, Clock } from 'lucide-svelte';
+	import { onMount } from 'svelte';
+	import { user } from '$lib/stores';
+	import { db } from '$lib/firebase';
+	import { collection, query, where, getDocs, doc, getDoc, orderBy } from 'firebase/firestore';
+	import { Calendar, MapPin, Loader2, Plus } from 'lucide-svelte';
+	import { goto } from '$app/navigation';
 
-	// 탭 상태 관리 ('applied' | 'participating')
+	// 탭 상태 관리
 	let activeTab = 'participating';
+	let participatingMeetings = [];
+	let appliedMeetings = [];
+	let isLoading = true;
 
-	// 임시 데이터: 참여 중인 모임
-	let participatingMeetings = [
-		{
-			id: 1,
-			title: '주말 독서의 장',
-			date: '2025. 11. 28 (토) 14:00',
-			location: '강남구 테헤란로',
-			image: '/images/book.png',
-			status: '참여확정',
-			dday: 'D-3'
-		},
-		{
-			id: 2,
-			title: '신천 러닝 크루',
-			date: '2025. 11. 26 (목) 19:30',
-			location: '송파구 올림픽로',
-			image: '/images/run.png',
-			status: '참여확정',
-			dday: 'D-1'
-		}
-	];
+	// [수정] 중복 실행 방지를 위한 변수 추가
+	let loadedUserId = null;
 
-	// 임시 데이터: 신청한 모임 (대기중)
-	let appliedMeetings = [
-		{
-			id: 3,
-			title: '개발자 네트워킹',
-			date: '2025. 12. 05 (금) 19:00',
-			location: '분당구 불정로',
-			image: 'https://placehold.co/600x400/black/white?text=Dev',
-			status: '승인대기'
+	// [수정] 유저 ID가 변경되었을 때만 데이터 가져오기 (무한 루프 방지)
+	$: if ($user) {
+		if ($user.uid !== loadedUserId) {
+			loadedUserId = $user.uid;
+			fetchMyMeetings();
 		}
-	];
+	} else if (!$user && !isLoading) {
+		// 로그아웃 상태 처리
+		participatingMeetings = [];
+		appliedMeetings = [];
+		loadedUserId = null;
+		isLoading = false; // 로딩 상태 해제
+	}
+
+	async function fetchMyMeetings() {
+		isLoading = true;
+		try {
+			// 1. 내 신청 내역 가져오기 (최신순)
+			const q = query(
+				collection(db, 'meeting_applications'),
+				where('userId', '==', $user.uid),
+				orderBy('appliedAt', 'desc')
+			);
+			const snapshot = await getDocs(q);
+			const applications = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+			// 2. 각 신청 건에 대해 모임 상세 정보 가져오기
+			const promises = applications.map(async (app) => {
+				if (!app.meetingId) return null;
+
+				try {
+					const meetingRef = doc(db, 'meetings', app.meetingId);
+					const meetingSnap = await getDoc(meetingRef);
+					
+					if (meetingSnap.exists()) {
+						const meetingData = meetingSnap.data();
+						return {
+							...app,
+							title: meetingData.title,
+							date: meetingData.date,
+							location: meetingData.location,
+							image: meetingData.image,
+							dday: calculateDday(meetingData.date)
+						};
+					}
+					return null;
+				} catch (e) {
+					console.error(e);
+					return null;
+				}
+			});
+
+			const results = await Promise.all(promises);
+			const validResults = results.filter(r => r !== null);
+
+			// 3. 상태별로 분류
+			participatingMeetings = validResults.filter(r => r.status === 'accepted');
+			appliedMeetings = validResults.filter(r => r.status === 'pending');
+
+		} catch (error) {
+			console.error("내 모임 로딩 실패:", error);
+		} finally {
+			isLoading = false;
+		}
+	}
+
+	function calculateDday(dateStr) {
+		if (!dateStr) return '-';
+		const target = new Date(dateStr);
+		const now = new Date();
+		const diffTime = target.getTime() - now.getTime();
+		const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+		
+		if (diffDays < 0) return '종료';
+		if (diffDays === 0) return 'D-Day';
+		return `D-${diffDays}`;
+	}
+
+	function formatMeetingDate(isoString) {
+		if (!isoString) return '';
+		const date = new Date(isoString);
+		return date.toLocaleString('ko-KR', {
+			month: 'numeric', day: 'numeric',
+			weekday: 'short', hour: '2-digit', minute: '2-digit'
+		});
+	}
+
+	function goToCreate() {
+		goto('/meetings/new');
+	}
 </script>
 
 <div class="page-container">
@@ -60,7 +128,17 @@
 	</div>
 
 	<div class="list-container">
-		{#if activeTab === 'participating'}
+		{#if isLoading}
+			<div class="loading-state">
+				<Loader2 size={24} class="spin" />
+				<span>정보를 불러오는 중입니다...</span>
+			</div>
+		{:else if !$user}
+			<div class="empty-state">
+				<p>로그인이 필요한 서비스입니다.</p>
+				<a href="/login" class="login-link">로그인하기</a>
+			</div>
+		{:else if activeTab === 'participating'}
 			{#if participatingMeetings.length > 0}
 				{#each participatingMeetings as meeting}
 					<div class="meeting-card">
@@ -70,11 +148,11 @@
 						</div>
 						<div class="content">
 							<div class="status-row">
-								<span class="status-badge confirmed">{meeting.status}</span>
+								<span class="status-badge confirmed">참여확정</span>
 							</div>
 							<h3 class="title">{meeting.title}</h3>
 							<div class="info-row">
-								<Calendar size={14} /> <span>{meeting.date}</span>
+								<Calendar size={14} /> <span>{formatMeetingDate(meeting.date)}</span>
 							</div>
 							<div class="info-row">
 								<MapPin size={14} /> <span>{meeting.location}</span>
@@ -96,11 +174,11 @@
 						</div>
 						<div class="content">
 							<div class="status-row">
-								<span class="status-badge waiting">{meeting.status}</span>
+								<span class="status-badge waiting">승인대기</span>
 							</div>
 							<h3 class="title">{meeting.title}</h3>
 							<div class="info-row">
-								<Calendar size={14} /> <span>{meeting.date}</span>
+								<Calendar size={14} /> <span>{formatMeetingDate(meeting.date)}</span>
 							</div>
 							<div class="info-row">
 								<MapPin size={14} /> <span>{meeting.location}</span>
@@ -115,11 +193,19 @@
 			{/if}
 		{/if}
 	</div>
+
+	<button class="fab" on:click={goToCreate} aria-label="모임 개설하기">
+		<Plus size={24} />
+	</button>
 </div>
 
 <style>
+	/* 스타일은 기존과 동일 */
 	.page-container {
 		padding: 20px 16px;
+		padding-bottom: 80px;
+		position: relative;
+		min-height: 100vh;
 	}
 
 	.page-title {
@@ -128,7 +214,6 @@
 		margin: 0 0 20px 0;
 	}
 
-	/* 탭 스타일 */
 	.tabs {
 		display: flex;
 		gap: 8px;
@@ -162,7 +247,6 @@
 		background-color: #333;
 	}
 
-	/* 카드 리스트 스타일 */
 	.list-container {
 		display: flex;
 		flex-direction: column;
@@ -255,10 +339,45 @@
 		margin-bottom: 2px;
 	}
 
-	.empty-state {
-		padding: 40px 0;
+	.empty-state, .loading-state {
+		padding: 60px 0;
 		text-align: center;
 		color: #999;
 		font-size: 14px;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 10px;
 	}
+
+	.spin { animation: spin 1s linear infinite; }
+	@keyframes spin { 100% { transform: rotate(360deg); } }
+
+	.login-link {
+		color: #1976d2;
+		text-decoration: underline;
+		font-weight: bold;
+	}
+
+	.fab {
+		position: fixed;
+		bottom: 80px;
+		right: 20px;
+		width: 56px;
+		height: 56px;
+		border-radius: 50%;
+		background-color: #333;
+		color: white;
+		border: none;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		z-index: 100;
+		transition: transform 0.2s;
+	}
+
+	.fab:active { transform: scale(0.95); }
 </style>
