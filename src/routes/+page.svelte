@@ -1,13 +1,13 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
-	import { goto } from '$app/navigation'; // [추가] 페이지 이동 함수
+	import { goto } from '$app/navigation';
 	import emblaCarouselSvelte from 'embla-carousel-svelte';
 	import { db } from '$lib/firebase';
 	import { collection, getDocs, query, orderBy, where, limit } from 'firebase/firestore';
-	import { appSettings } from '$lib/stores';
-	import { X } from 'lucide-svelte';
+	import { appSettings, user } from '$lib/stores';
+	import { X, Briefcase } from 'lucide-svelte';
+	import UserProfileModal from '$lib/components/UserProfileModal.svelte'; // [추가] 모달 import
 
-	const NAVER_CLIENT_ID = import.meta.env.VITE_NAVER_MAPS_CLIENT_ID;
 	// 모임 슬라이더 옵션
 	let emblaOptions = { loop: false, align: 'start', containScroll: 'trimSnaps' };
 	// 이벤트 슬라이더 관련 변수
@@ -18,12 +18,16 @@
 
 	// 데이터 상태
 	let meetings = [];
+	let randomUsers = [];
 	let isLoading = true;
 
 	// 배너 모달 상태
 	let showBannerModal = false;
 	let activeBanner = null;
 	let dontShowChecked = false;
+
+	// [추가] 프로필 모달 상태
+	let selectedUser = null;
 
 	function getLocalTodayString() {
 		const now = new Date();
@@ -64,7 +68,30 @@
 		} catch (error) { console.error("이벤트 로딩 실패", error); }
 	}
 
-	// 슬라이더 초기화 시 API 바인딩 및 오토플레이 시작
+	// 랜덤 회원 불러오기
+	async function fetchRandomUsers() {
+		try {
+			const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'), limit(20));
+			const snapshot = await getDocs(q);
+			
+			let allUsers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+			
+			if ($user) {
+				allUsers = allUsers.filter(u => u.id !== $user.uid);
+			}
+
+			for (let i = allUsers.length - 1; i > 0; i--) {
+				const j = Math.floor(Math.random() * (i + 1));
+				[allUsers[i], allUsers[j]] = [allUsers[j], allUsers[i]];
+			}
+
+			randomUsers = allUsers.slice(0, 5);
+
+		} catch (error) {
+			console.error("회원 추천 로딩 실패", error);
+		}
+	}
+
 	function onEventInit(event) {
 		eventEmblaApi = event.detail;
 		startAutoplay();
@@ -103,60 +130,6 @@
 		showBannerModal = false;
 	}
 
-	// --- 지도 로직 ---
-	let mapElement;
-	let map;
-
-	function addMarkerFromAddress(meeting) {
-		if (!window.naver || !map) return;
-		window.naver.maps.Service.geocode({ query: meeting.location }, (status, response) => {
-			if (status !== window.naver.maps.Service.Status.OK) return;
-			const item = response.v2.addresses[0];
-			const pos = new window.naver.maps.LatLng(item.y, item.x);
-			
-			// [수정] 마커 생성 및 클릭 이벤트 추가
-			const marker = new window.naver.maps.Marker({ 
-				position: pos, 
-				map, 
-				title: meeting.title,
-				// 마커에 커서 포인터 스타일 추가 (선택 사항)
-				cursor: 'pointer' 
-			});
-
-			// 마커 클릭 시 상세 페이지 이동
-			window.naver.maps.Event.addListener(marker, 'click', () => {
-				goto(`/meetings/${meeting.id}`);
-			});
-		});
-	}
-
-	function createMap(centerLat, centerLng, isMyLocation) {
-		if (!mapElement || !window.naver) return;
-		const center = new window.naver.maps.LatLng(centerLat, centerLng);
-		map = new window.naver.maps.Map(mapElement, {
-			center, zoom: 14, minZoom: 6, scaleControl: false, logoControl: false, mapDataControl: false,
-			zoomControl: true, zoomControlOptions: { position: window.naver.maps.Position.TOP_RIGHT }
-		});
-		if (isMyLocation) {
-			new window.naver.maps.Marker({
-				position: center, map, title: '내 위치', zIndex: 100,
-				icon: { content: `<div style="width:20px;height:20px;background:#4285F4;border:3px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,0.3);"></div>` }
-			});
-		}
-		meetings.forEach(m => addMarkerFromAddress(m));
-	}
-
-	function startMapInitialization() {
-		const defLat = 37.5665, defLng = 126.9780;
-		if (navigator.geolocation) {
-			navigator.geolocation.getCurrentPosition(
-				p => createMap(p.coords.latitude, p.coords.longitude, true),
-				() => createMap(defLat, defLng, false),
-				{ enableHighAccuracy: true, timeout: 5000 }
-			);
-		} else createMap(defLat, defLng, false);
-	}
-
 	function getRemainingTime(targetDateStr) {
 		const diff = new Date(targetDateStr) - new Date();
 		if (diff <= 0) return '마감됨';
@@ -165,28 +138,22 @@
 		return days === 0 ? `${hours}시간 남음` : `${days}일 ${hours}시간 남음`;
 	}
 
+	// [추가] 모달 열기 함수
+	function openProfileModal(user) {
+		selectedUser = user;
+	}
+
 	onMount(async () => {
 		await fetchMeetings();
 		fetchActiveEvents();
+		fetchRandomUsers();
 		checkAndShowBanner();
-
-		const interval = setInterval(() => {
-			if (window.naver && window.naver.maps?.Service) {
-				clearInterval(interval);
-				startMapInitialization();
-			}
-		}, 100);
-		return () => clearInterval(interval);
 	});
 
 	onDestroy(() => {
 		if (autoplayInterval) clearInterval(autoplayInterval);
 	});
 </script>
-
-<svelte:head>
-	<script type="text/javascript" src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId={NAVER_CLIENT_ID}&submodules=geocoder"></script>
-</svelte:head>
 
 <div class="page-container">
 	{#if activeEvents.length > 0}
@@ -247,10 +214,38 @@
 	</section>
 
 	<section class="section">
-		<h2 class="section-title">내 주변 대화장</h2>
-		<div class="map-wrapper">
-			<div bind:this={mapElement} id="map" class="map-container"></div>
-		</div>
+		<h2 class="section-title">새로운 멤버를 만나보세요 ✨</h2>
+		<p class="section-desc">비슷한 관심사를 가진 멤버들이에요.</p>
+		
+		{#if randomUsers.length > 0}
+			<div class="user-list-container">
+				<div class="user-list">
+					{#each randomUsers as user}
+						<button class="user-card" on:click={() => openProfileModal(user)}>
+							<div class="user-avatar">
+								{#if user.image}
+									<img src={user.image} alt={user.nickname} />
+								{:else}
+									<span>{user.nickname?.[0] || 'U'}</span>
+								{/if}
+							</div>
+							<div class="user-info">
+								<span class="user-name">{user.nickname}</span>
+								{#if user.job}
+									<span class="user-job">{user.job}</span>
+								{:else}
+									<span class="user-job text-muted">소개 없음</span>
+								{/if}
+							</div>
+						</button>
+					{/each}
+				</div>
+			</div>
+		{:else}
+			<div class="empty-box">
+				추천할 회원이 아직 없습니다.
+			</div>
+		{/if}
 	</section>
 </div>
 
@@ -273,6 +268,13 @@
 	</div>
 {/if}
 
+{#if selectedUser}
+	<UserProfileModal 
+		user={selectedUser} 
+		on:close={() => selectedUser = null} 
+	/>
+{/if}
+
 <style>
 	.page-container { padding: 20px 0; }
 	.section { margin-bottom: 32px; }
@@ -280,7 +282,7 @@
 	.section-desc { font-size: 14px; color: #666; margin: 0 0 16px 16px; }
 	.loading-box, .empty-box { text-align: center; padding: 40px; color: #999; font-size: 14px; }
 
-	/* 이벤트 슬라이더 스타일 */
+	/* 이벤트 슬라이더 */
 	.event-section { margin-bottom: 32px; }
 	.event-slider { overflow: hidden; }
 	.event-slide { flex: 0 0 100%; padding: 0 16px; box-sizing: border-box; }
@@ -299,18 +301,15 @@
 	.event-badge { background: #e53e3e; font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-bottom: 4px; display: inline-block; }
 	.event-title { margin: 0; font-size: 18px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
 
-	/* 모임 슬라이더 & 카드 */
+	/* 모임 카드 */
 	.embla { overflow: hidden; }
 	.embla__container { display: flex; gap: 16px; padding: 0 16px; }
 	.embla__slide { flex: 0 0 80%; min-width: 0; }
 	
-	/* [수정] a 태그 스타일 적용 (기존 div 스타일 유지 + 링크 스타일 제거) */
 	.card { 
 		border-radius: 16px; overflow: hidden; background-color: white;
 		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); height: 260px; display: flex; flex-direction: column;
-		text-decoration: none; /* 링크 밑줄 제거 */
-		color: inherit; /* 텍스트 색상 유지 */
-		transition: transform 0.2s; /* 클릭 효과 추가 */
+		text-decoration: none; color: inherit; transition: transform 0.2s;
 	}
 	.card:active { transform: scale(0.98); }
 
@@ -322,9 +321,54 @@
 	.card-title { font-size: 18px; font-weight: bold; margin: 0 0 4px 0; }
 	.card-location { font-size: 12px; color: #888; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-	/* 지도 */
-	.map-wrapper { padding: 0 16px; }
-	.map-container { width: 100%; height: 300px; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); background-color: #f0f0f0; touch-action: none; }
+	/* 랜덤 회원 리스트 */
+	.user-list-container {
+		overflow-x: auto;
+		padding: 0 16px;
+		-ms-overflow-style: none; 
+		scrollbar-width: none;
+	}
+	.user-list-container::-webkit-scrollbar { display: none; }
+
+	.user-list {
+		display: flex;
+		gap: 16px;
+		padding-bottom: 10px;
+	}
+
+	.user-card {
+		flex: 0 0 100px;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		text-align: center;
+		gap: 8px;
+		/* [추가] 버튼 스타일 초기화 */
+		background: none; border: none; padding: 0; cursor: pointer;
+	}
+	/* [추가] 클릭 시 시각적 피드백 */
+	.user-card:active { opacity: 0.7; transform: scale(0.98); transition: transform 0.1s; }
+
+	.user-avatar {
+		width: 64px;
+		height: 64px;
+		border-radius: 50%;
+		background-color: #edf2f7;
+		overflow: hidden;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border: 2px solid #fff;
+		box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+	}
+
+	.user-avatar img { width: 100%; height: 100%; object-fit: cover; }
+	.user-avatar span { font-size: 20px; font-weight: bold; color: #718096; }
+
+	.user-info { display: flex; flex-direction: column; gap: 2px; width: 100%; }
+	.user-name { font-size: 13px; font-weight: 600; color: #2d3748; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; }
+	.user-job { font-size: 11px; color: #718096; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; }
+	.text-muted { color: #cbd5e0; }
 
 	/* 배너 모달 */
 	.banner-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.6); z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 20px; }
