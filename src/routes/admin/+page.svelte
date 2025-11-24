@@ -1,296 +1,232 @@
 <script>
 	import { onMount } from 'svelte';
-	import emblaCarouselSvelte from 'embla-carousel-svelte';
 	import { db } from '$lib/firebase';
-	import { collection, getDocs, query, orderBy, where, limit } from 'firebase/firestore';
-	import { appSettings } from '$lib/stores';
-	import { X } from 'lucide-svelte'; // [추가] 닫기 아이콘
+	import { 
+		collection, getCountFromServer, query, where, orderBy, limit, getDocs 
+	} from 'firebase/firestore';
+	import { Users, Calendar, MessageSquare, DollarSign } from 'lucide-svelte';
+	
+	// 공통 모달 컴포넌트 가져오기
+	import UserEditModal from '$lib/components/admin/UserEditModal.svelte';
+	import MeetingEditModal from '$lib/components/admin/MeetingEditModal.svelte';
 
-	const NAVER_CLIENT_ID = import.meta.env.VITE_NAVER_MAPS_CLIENT_ID;
-	let emblaOptions = { loop: false, align: 'start', containScroll: 'trimSnaps' };
+	let stats = [
+		{ id: 'users', label: '총 회원수', value: '-', change: '', icon: Users, color: 'blue', link: '/admin/users' },
+		{ id: 'meetings', label: '활성 모임', value: '-', change: '', icon: Calendar, color: 'green', link: '/admin/meetings' },
+		{ id: 'chats', label: '개설된 채팅방', value: '-', change: '', icon: MessageSquare, color: 'purple', link: '/admin/chats' },
+		{ id: 'revenue', label: '예상 매출', value: '-', change: '', icon: DollarSign, color: 'orange', link: '/admin/payments' }
+	];
 
-	// 데이터 상태
-	let meetings = [];
+	let recentUsers = [];
+	let recentMeetings = [];
 	let isLoading = true;
 
-	// 배너 모달 상태 [추가]
-	let showBannerModal = false;
-	let activeBanner = null;
-	let dontShowChecked = false; // 오늘 하루 보지 않기 체크 여부
+	// 모달 상태
+	let isUserModalOpen = false;
+	let selectedUser = null;
+	let isMeetingModalOpen = false;
+	let selectedMeeting = null;
 
-	// 설정값 적용하여 모임 불러오기
-	$: if ($appSettings.sliderLimit) {
-		fetchMeetings();
-	}
-
-	async function fetchMeetings() {
+	onMount(async () => {
 		try {
 			const now = new Date().toISOString();
-			const q = query(
-				collection(db, 'meetings'), 
-				where('date', '>=', now), 
-				orderBy('date', 'asc'),
-				limit($appSettings.sliderLimit)
-			);
-			
-			const querySnapshot = await getDocs(q);
-			meetings = querySnapshot.docs.map(doc => ({
-				id: doc.id,
-				...doc.data()
-			}));
+
+			// 1. 통계
+			const usersCountSnap = await getCountFromServer(collection(db, 'users'));
+			const meetingsQuery = query(collection(db, 'meetings'), where('date', '>=', now));
+			const meetingsCountSnap = await getCountFromServer(meetingsQuery);
+			const chatsCountSnap = await getCountFromServer(collection(db, 'chatRooms'));
+
+			const userCount = usersCountSnap.data().count;
+			const meetingCount = meetingsCountSnap.data().count;
+			const chatCount = chatsCountSnap.data().count;
+			const estimatedRevenue = meetingCount * 2200000;
+
+			stats = stats.map(stat => {
+				if (stat.id === 'users') return { ...stat, value: `${userCount}명` };
+				if (stat.id === 'meetings') return { ...stat, value: `${meetingCount}개` };
+				if (stat.id === 'chats') return { ...stat, value: `${chatCount}개` };
+				if (stat.id === 'revenue') return { ...stat, value: `₩ ${(estimatedRevenue / 1000000).toFixed(1)}M` };
+				return stat;
+			});
+
+			// 2. 최근 가입 회원
+			const recentUsersQuery = query(collection(db, 'users'), orderBy('createdAt', 'desc'), limit(5));
+			const recentUsersSnap = await getDocs(recentUsersQuery);
+			recentUsers = recentUsersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+			// 3. 최근 개설 모임
+			const recentMeetingsQuery = query(collection(db, 'meetings'), orderBy('createdAt', 'desc'), limit(5));
+			const recentMeetingsSnap = await getDocs(recentMeetingsQuery);
+			recentMeetings = recentMeetingsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
 		} catch (error) {
-			console.error("모임 데이터 불러오기 실패:", error);
+			console.error("대시보드 데이터 로딩 실패:", error);
 		} finally {
 			isLoading = false;
 		}
-	}
-
-	// [추가] 활성 배너 불러오기 및 모달 노출 체크
-	async function checkAndShowBanner() {
-		// 1. 로컬 스토리지 확인 ('오늘 하루 보지 않기' 체크했는지)
-		const todayDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-		const hideDate = localStorage.getItem('hideBanner_date');
-
-		if (hideDate === todayDate) {
-			return; // 오늘 날짜로 숨김 처리되어 있으면 함수 종료
-		}
-
-		try {
-			// 2. Firestore에서 최신순으로 배너 가져오기
-			// (배너 수가 적으므로 전체 로드 후 필터링이 인덱스 관리 측면에서 효율적)
-			const q = query(collection(db, 'banners'), orderBy('createdAt', 'desc'));
-			const snapshot = await getDocs(q);
-			
-			const banners = snapshot.docs.map(doc => doc.data());
-			
-			// 3. 현재 기간에 진행 중인 배너 찾기
-			const validBanner = banners.find(b => {
-				return b.startDate <= todayDate && b.endDate >= todayDate;
-			});
-
-			if (validBanner) {
-				activeBanner = validBanner;
-				showBannerModal = true;
-			}
-		} catch (error) {
-			console.error("배너 로딩 실패:", error);
-		}
-	}
-
-	// [추가] 배너 닫기 처리
-	function closeBanner() {
-		if (dontShowChecked) {
-			const todayDate = new Date().toISOString().slice(0, 10);
-			localStorage.setItem('hideBanner_date', todayDate);
-		}
-		showBannerModal = false;
-	}
-
-	// 지도 관련 로직 (기존 유지)
-	let mapElement;
-	let map;
-
-	function addMarkerFromAddress(meeting) {
-		if (!window.naver || !map) return;
-		
-		window.naver.maps.Service.geocode(
-			{ query: meeting.location },
-			function (status, response) {
-				if (status !== window.naver.maps.Service.Status.OK) return;
-				const result = response.v2;
-				const items = result.addresses;
-				if (items.length > 0) {
-					const x = parseFloat(items[0].x);
-					const y = parseFloat(items[0].y);
-					const position = new window.naver.maps.LatLng(y, x);
-					new window.naver.maps.Marker({ position, map, title: meeting.title });
-				}
-			}
-		);
-	}
-
-	function createMap(centerLat, centerLng, isMyLocation) {
-		if (!mapElement || !window.naver) return;
-		const center = new window.naver.maps.LatLng(centerLat, centerLng);
-		const mapOptions = {
-			center, zoom: 14, minZoom: 6, scaleControl: false, logoControl: false, mapDataControl: false,
-			zoomControl: true, zoomControlOptions: { position: window.naver.maps.Position.TOP_RIGHT }
-		};
-		map = new window.naver.maps.Map(mapElement, mapOptions);
-		
-		if (isMyLocation) {
-			new window.naver.maps.Marker({
-				position: center, map, title: '내 위치', zIndex: 100,
-				icon: { content: `<div style="width: 20px; height: 20px; background: #4285F4; border: 3px solid white; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,0.3);"></div>`, anchor: new window.naver.maps.Point(10, 10) }
-			});
-		}
-		meetings.forEach(meeting => addMarkerFromAddress(meeting));
-	}
-
-	function startMapInitialization() {
-		const defaultLat = 37.5665;
-		const defaultLng = 126.9780;
-		if (navigator.geolocation) {
-			navigator.geolocation.getCurrentPosition(
-				(position) => createMap(position.coords.latitude, position.coords.longitude, true),
-				(error) => createMap(defaultLat, defaultLng, false),
-				{ enableHighAccuracy: true, timeout: 5000 }
-			);
-		} else {
-			createMap(defaultLat, defaultLng, false);
-		}
-	}
-
-	function getRemainingTime(targetDateStr) {
-		const target = new Date(targetDateStr);
-		const current = new Date();
-		const diff = target - current;
-		if (diff <= 0) return '마감됨';
-		const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-		const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-		if (days === 0) return `${hours}시간 남음`;
-		return `${days}일 ${hours}시간 남음`;
-	}
-
-	onMount(async () => {
-		await fetchMeetings();
-		checkAndShowBanner(); // [추가] 배너 체크 실행
-
-		const interval = setInterval(() => {
-			if (window.naver && window.naver.maps && window.naver.maps.Service) {
-				clearInterval(interval);
-				startMapInitialization();
-			}
-		}, 100);
-		return () => clearInterval(interval);
 	});
+
+	// --- 회원 수정 핸들러 ---
+	function openUserModal(user) {
+		selectedUser = user;
+		isUserModalOpen = true;
+	}
+	function handleUserSaved(e) {
+		const updatedUser = e.detail;
+		recentUsers = recentUsers.map(u => u.id === updatedUser.id ? updatedUser : u);
+		isUserModalOpen = false;
+		selectedUser = null;
+	}
+
+	// --- 모임 수정 핸들러 ---
+	function openMeetingModal(meeting) {
+		selectedMeeting = meeting;
+		isMeetingModalOpen = true;
+	}
+	function handleMeetingSaved(e) {
+		const updatedMeeting = e.detail;
+		recentMeetings = recentMeetings.map(m => m.id === updatedMeeting.id ? updatedMeeting : m);
+		isMeetingModalOpen = false;
+		selectedMeeting = null;
+	}
+
+	function formatDate(isoString) {
+		if (!isoString) return '-';
+		return new Date(isoString).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' });
+	}
 </script>
 
-<svelte:head>
-	<script type="text/javascript" src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId={NAVER_CLIENT_ID}&submodules=geocoder"></script>
-</svelte:head>
+<div class="dashboard">
+	<div class="stats-grid">
+		{#each stats as stat}
+			<a href={stat.link} class="stat-card">
+				<div class="stat-header">
+					<span class="label">{stat.label}</span>
+					<div class="icon-box {stat.color}">
+						<stat.icon size={20} />
+					</div>
+				</div>
+				<div class="stat-value">{stat.value}</div>
+				<div class="stat-change"><span class="text-muted">실시간 집계 기준</span></div>
+			</a>
+		{/each}
+	</div>
 
-<div class="page-container">
-	<section class="section">
-		<h2 class="section-title">새로 개설된 모임 👋</h2>
-		<p class="section-desc">관심 있는 주제의 대화에 참여해보세요.</p>
+	<div class="recent-section">
+		<div class="card">
+			<h3>최근 가입 회원</h3>
+			<div class="table-wrapper">
+				<table>
+					<thead>
+						<tr>
+							<th>사용자</th>
+							<th>가입일</th>
+							<th>상태</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#if recentUsers.length > 0}
+							{#each recentUsers as user}
+								<tr on:click={() => openUserModal(user)} class="clickable-row">
+									<td>
+										<div class="user-cell">
+											<div class="avatar-mini">
+												{#if user.image}
+													<img src={user.image} alt={user.nickname} />
+												{:else}
+													<span>{user.nickname?.[0] || 'U'}</span>
+												{/if}
+											</div>
+											<span>{user.nickname || '이름 없음'}</span>
+										</div>
+									</td>
+									<td>{formatDate(user.createdAt)}</td>
+									<td><span class="status {user.status || 'active'}">{user.status || 'Active'}</span></td>
+								</tr>
+							{/each}
+						{:else}
+							<tr><td colspan="3" class="empty-row">데이터가 없습니다.</td></tr>
+						{/if}
+					</tbody>
+				</table>
+			</div>
+		</div>
 
-		{#if isLoading}
-			<div class="loading-box">데이터를 불러오는 중...</div>
-		{:else if meetings.length > 0}
-			<div class="embla" use:emblaCarouselSvelte={{ options: emblaOptions }}>
-				<div class="embla__container">
-					{#each meetings as meeting}
-						<div class="embla__slide">
-							<div class="card">
-								<div class="card-image-wrapper">
-									<img src={meeting.image} alt={meeting.title} class="card-image" />
-									<div class="time-badge">{getRemainingTime(meeting.date)}</div>
-								</div>
-								<div class="card-content">
-									<span class="badge">{meeting.category}</span>
-									<h3 class="card-title">{meeting.title}</h3>
-									<p class="card-location">📍 {meeting.location}</p>
-								</div>
+		<div class="card">
+			<h3>최근 개설된 모임</h3>
+			<div class="list-wrapper">
+				{#if recentMeetings.length > 0}
+					{#each recentMeetings as meeting}
+						<div class="list-item clickable-row" on:click={() => openMeetingModal(meeting)}>
+							<div class="item-info">
+								<span class="item-title">{meeting.title}</span>
+								<span class="item-sub">{meeting.category} • {formatDate(meeting.date)} 예정</span>
 							</div>
 						</div>
 					{/each}
-				</div>
-			</div>
-		{:else}
-			<div class="empty-box">
-				<p>예정된 모임이 없습니다.</p>
-				<span style="font-size: 12px; color: #aaa;">(관리자 페이지에서 데이터를 추가해보세요)</span>
-			</div>
-		{/if}
-	</section>
-
-	<section class="section">
-		<h2 class="section-title">내 주변 대화장</h2>
-		<div class="map-wrapper">
-			<div bind:this={mapElement} id="map" class="map-container"></div>
-		</div>
-	</section>
-</div>
-
-{#if showBannerModal && activeBanner}
-	<div class="banner-overlay">
-		<div class="banner-modal">
-			<div class="banner-body">
-				<a href={activeBanner.link || '#'} target="_blank" rel="noopener noreferrer" class="banner-link">
-					<img src={activeBanner.image} alt="Event Banner" />
-				</a>
-			</div>
-			<div class="banner-footer">
-				<label class="checkbox-label">
-					<input type="checkbox" bind:checked={dontShowChecked} />
-					<span>오늘 하루 보지 않기</span>
-				</label>
-				<button class="close-btn" on:click={closeBanner}>
-					닫기 <X size={16} />
-				</button>
+				{:else}
+					<div class="empty-row">개설된 모임이 없습니다.</div>
+				{/if}
 			</div>
 		</div>
 	</div>
+</div>
+
+{#if isUserModalOpen && selectedUser}
+	<UserEditModal 
+		user={selectedUser} 
+		on:close={() => isUserModalOpen = false} 
+		on:save={handleUserSaved} 
+	/>
+{/if}
+
+{#if isMeetingModalOpen && selectedMeeting}
+	<MeetingEditModal 
+		meeting={selectedMeeting} 
+		on:close={() => isMeetingModalOpen = false} 
+		on:save={handleMeetingSaved} 
+	/>
 {/if}
 
 <style>
-	.page-container { padding: 20px 0; }
-	.section { margin-bottom: 32px; }
-	.section-title { font-size: 20px; font-weight: bold; margin: 0 0 8px 16px; }
-	.section-desc { font-size: 14px; color: #666; margin: 0 0 16px 16px; }
-	
-	.loading-box, .empty-box { text-align: center; padding: 40px; color: #999; font-size: 14px; }
+	.dashboard { padding-bottom: 40px; }
+	.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; margin-bottom: 32px; }
+	.stat-card { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); text-decoration: none; color: inherit; display: block; transition: transform 0.2s; cursor: pointer; }
+	.stat-card:hover { transform: translateY(-4px); }
+	.stat-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+	.label { color: #718096; font-size: 14px; font-weight: 500; }
+	.icon-box { width: 40px; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; }
+	.icon-box.blue { background-color: #4299e1; }
+	.icon-box.green { background-color: #48bb78; }
+	.icon-box.purple { background-color: #9f7aea; }
+	.icon-box.orange { background-color: #ed8936; }
+	.stat-value { font-size: 24px; font-weight: bold; color: #2d3748; margin-bottom: 4px; }
+	.stat-change { font-size: 12px; color: #48bb78; font-weight: 600; }
+	.text-muted { color: #a0aec0; font-weight: normal; }
 
-	/* 슬라이더 & 카드 */
-	.embla { overflow: hidden; }
-	.embla__container { display: flex; gap: 16px; padding: 0 16px; }
-	.embla__slide { flex: 0 0 80%; min-width: 0; }
-	.card { border-radius: 16px; overflow: hidden; background-color: white; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); height: 260px; display: flex; flex-direction: column; }
-	.card-image-wrapper { position: relative; width: 100%; height: 140px; }
-	.card-image { width: 100%; height: 100%; object-fit: cover; }
-	.time-badge { position: absolute; top: 10px; right: 10px; background-color: rgba(0, 0, 0, 0.6); color: white; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 12px; backdrop-filter: blur(4px); z-index: 10; }
-	.card-content { padding: 16px; flex: 1; display: flex; flex-direction: column; justify-content: center; }
-	.badge { display: inline-block; font-size: 12px; color: #555; background-color: #f0f0f0; padding: 4px 8px; border-radius: 4px; align-self: flex-start; margin-bottom: 6px; }
-	.card-title { font-size: 18px; font-weight: bold; margin: 0 0 4px 0; }
-	.card-location { font-size: 12px; color: #888; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.recent-section { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
+	@media (max-width: 1024px) { .recent-section { grid-template-columns: 1fr; } }
 
-	/* 지도 */
-	.map-wrapper { padding: 0 16px; }
-	.map-container { width: 100%; height: 300px; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); background-color: #f0f0f0; touch-action: none; }
+	.card { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+	.card h3 { margin: 0 0 20px 0; font-size: 16px; color: #2d3748; }
 
-	/* [추가] 배너 모달 스타일 */
-	.banner-overlay {
-		position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-		background-color: rgba(0, 0, 0, 0.6); z-index: 2000;
-		display: flex; align-items: center; justify-content: center;
-		padding: 20px;
-	}
-	.banner-modal {
-		width: 100%; max-width: 360px;
-		background-color: white; border-radius: 16px; overflow: hidden;
-		box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
-		display: flex; flex-direction: column;
-	}
-	.banner-body {
-		width: 100%; /* 높이는 이미지 비율에 따름 */
-		background-color: #000; /* 이미지 로딩 전 배경 */
-	}
-	.banner-link { display: block; font-size: 0; } /* 앵커 태그 여백 제거 */
-	.banner-body img {
-		width: 100%; height: auto; object-fit: contain; display: block;
-	}
-	.banner-footer {
-		height: 50px; background-color: #1a1a1a; color: white;
-		display: flex; justify-content: space-between; align-items: center;
-		padding: 0 16px; font-size: 13px;
-	}
-	.checkbox-label {
-		display: flex; align-items: center; gap: 8px; cursor: pointer; color: #ccc;
-	}
-	.checkbox-label input { accent-color: #fff; cursor: pointer; }
-	.close-btn {
-		background: none; border: none; color: white; font-weight: bold;
-		cursor: pointer; display: flex; align-items: center; gap: 4px; font-size: 14px;
-	}
+	table { width: 100%; border-collapse: collapse; }
+	th { text-align: left; color: #718096; font-size: 12px; font-weight: 600; padding-bottom: 12px; border-bottom: 1px solid #e2e8f0; }
+	td { padding: 12px 0; font-size: 14px; color: #4a5568; border-bottom: 1px solid #f7fafc; }
+	.user-cell { display: flex; align-items: center; gap: 8px; }
+	.avatar-mini { width: 24px; height: 24px; border-radius: 50%; background-color: #eee; overflow: hidden; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #666; }
+	.avatar-mini img { width: 100%; height: 100%; object-fit: cover; }
+	.status { padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: capitalize; }
+	.status.active { background-color: #c6f6d5; color: #2f855a; }
+	.status.suspended { background-color: #fed7d7; color: #c53030; }
+
+	.list-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f7fafc; }
+	.item-info { display: flex; flex-direction: column; gap: 4px; }
+	.item-title { font-size: 14px; font-weight: 500; color: #2d3748; }
+	.item-sub { font-size: 12px; color: #718096; }
+	.btn-sm { padding: 4px 12px; border: 1px solid #e2e8f0; background: white; border-radius: 4px; font-size: 12px; cursor: pointer; }
+	.empty-row { padding: 20px 0; text-align: center; color: #999; font-size: 14px; }
+	.clickable-row { cursor: pointer; transition: background 0.1s; }
+	.clickable-row:hover { background-color: #f7fafc; }
 </style>

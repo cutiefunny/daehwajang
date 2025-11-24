@@ -2,10 +2,10 @@
 	import { onMount } from 'svelte';
 	import { db } from '$lib/firebase';
 	import { 
-		collection, getDocs, query, orderBy, addDoc, deleteDoc, doc, serverTimestamp 
+		collection, getDocs, query, orderBy, addDoc, deleteDoc, doc, serverTimestamp, updateDoc 
 	} from 'firebase/firestore';
 	import { 
-		Search, Plus, Trash2, Calendar, Image as ImageIcon, X, ChevronLeft, ChevronRight
+		Search, Plus, Trash2, Calendar, Image as ImageIcon, X, ChevronLeft, ChevronRight, Link as LinkIcon, AlignLeft
 	} from 'lucide-svelte';
 	import ImageUploader from '$lib/components/ImageUploader.svelte';
 
@@ -20,13 +20,17 @@
 	// 모달 상태
 	let isModalOpen = false;
 	let isSubmitting = false;
+	let isEditMode = false;
 
-	// 새 이벤트 폼 데이터
-	let newEvent = {
+	// 폼 데이터
+	let formData = {
+		id: null,
 		title: '',
 		startDate: '',
 		endDate: '',
-		image: ''
+		image: '',
+		description: '', // [추가] 이벤트 설명
+		link: ''         // [추가] 버튼 링크
 	};
 
 	// 이벤트 목록 불러오기
@@ -47,35 +51,66 @@
 		}
 	}
 
-	// 모달 열기/닫기
-	function openModal() {
-		newEvent = { title: '', startDate: '', endDate: '', image: '' };
+	// 등록 모달 열기
+	function openCreateModal() {
+		isEditMode = false;
+		// 폼 초기화 (새 필드 포함)
+		formData = { id: null, title: '', startDate: '', endDate: '', image: '', description: '', link: '' };
 		isModalOpen = true;
 	}
+
+	// 수정 모달 열기
+	function openEditModal(event) {
+		isEditMode = true;
+		// 기존 데이터에 새 필드가 없을 경우 대비해 기본값 병합
+		formData = { 
+			description: '', 
+			link: '', 
+			...event 
+		}; 
+		isModalOpen = true;
+	}
+
 	function closeModal() {
 		isModalOpen = false;
 	}
 
-	// 이벤트 등록 (Firestore 저장)
+	// 이벤트 저장
 	async function submitEvent() {
-		if (!newEvent.title || !newEvent.startDate || !newEvent.endDate) {
+		if (!formData.title || !formData.startDate || !formData.endDate) {
 			return alert('필수 정보를 모두 입력해주세요.');
 		}
 
 		isSubmitting = true;
 		try {
-			await addDoc(collection(db, 'events'), {
-				...newEvent,
-				createdAt: serverTimestamp(), // 게시일 (서버 시간)
-				postedAt: new Date().toISOString() // 화면 표시용 (로컬 시간)
-			});
+			const eventData = {
+				title: formData.title,
+				startDate: formData.startDate,
+				endDate: formData.endDate,
+				image: formData.image,
+				description: formData.description, // 저장
+				link: formData.link               // 저장
+			};
+
+			if (isEditMode) {
+				const eventRef = doc(db, 'events', formData.id);
+				await updateDoc(eventRef, eventData);
+				events = events.map(e => e.id === formData.id ? { ...e, ...eventData } : e);
+				alert('이벤트가 수정되었습니다.');
+			} else {
+				await addDoc(collection(db, 'events'), {
+					...eventData,
+					createdAt: serverTimestamp(),
+					postedAt: new Date().toISOString()
+				});
+				alert('이벤트가 등록되었습니다.');
+				fetchEvents();
+			}
 			
-			alert('이벤트가 등록되었습니다.');
 			closeModal();
-			fetchEvents(); // 목록 갱신
 		} catch (error) {
-			console.error("등록 실패:", error);
-			alert("등록 중 오류가 발생했습니다.");
+			console.error("저장 실패:", error);
+			alert("저장 중 오류가 발생했습니다.");
 		} finally {
 			isSubmitting = false;
 		}
@@ -93,14 +128,13 @@
 		}
 	}
 
-	// 날짜 포맷팅 (YYYY.MM.DD)
 	function formatDate(isoString) {
 		if (!isoString) return '-';
 		return new Date(isoString).toLocaleDateString('ko-KR');
 	}
 
 	// 검색 및 페이지네이션
-	$: filteredEvents = events.filter(e => e.title.toLowerCase().includes(searchTerm.toLowerCase()));
+	$: filteredEvents = events.filter(e => e.title?.toLowerCase().includes(searchTerm.toLowerCase()));
 	$: if (searchTerm) currentPage = 1;
 	$: totalPages = Math.ceil(filteredEvents.length / itemsPerPage);
 	$: paginatedEvents = filteredEvents.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -121,7 +155,7 @@
 			<Search size={18} color="#718096" />
 			<input type="text" placeholder="이벤트명 검색" bind:value={searchTerm} />
 		</div>
-		<button class="create-btn" on:click={openModal}>
+		<button class="create-btn" on:click={openCreateModal}>
 			<Plus size={18} /> 이벤트 작성
 		</button>
 	</div>
@@ -134,17 +168,18 @@
 		<table>
 			<thead>
 				<tr>
-					<th>이미지</th>
-					<th>이벤트명</th>
+					<th style="width: 80px;">이미지</th>
+					<th>이벤트 정보</th>
 					<th>게시일</th>
 					<th>기간</th>
+					<th>링크</th>
 					<th>관리</th>
 				</tr>
 			</thead>
 			<tbody>
 				{#if paginatedEvents.length > 0}
 					{#each paginatedEvents as event}
-						<tr>
+						<tr on:click={() => openEditModal(event)} class="clickable-row">
 							<td>
 								<div class="event-thumb">
 									{#if event.image}
@@ -154,7 +189,14 @@
 									{/if}
 								</div>
 							</td>
-							<td class="title-cell">{event.title}</td>
+							<td>
+								<div class="event-info">
+									<span class="title-text">{event.title}</span>
+									{#if event.description}
+										<span class="desc-text">{event.description}</span>
+									{/if}
+								</div>
+							</td>
 							<td>{formatDate(event.postedAt)}</td>
 							<td>
 								<div class="period-badge">
@@ -162,14 +204,32 @@
 								</div>
 							</td>
 							<td>
-								<button class="icon-btn delete" on:click={() => deleteEvent(event.id)}>
+								{#if event.link}
+									<a 
+										href={event.link} 
+										target="_blank" 
+										class="link-icon"
+										on:click|stopPropagation
+										title={event.link}
+									>
+										<LinkIcon size={16} />
+									</a>
+								{:else}
+									<span class="no-link">-</span>
+								{/if}
+							</td>
+							<td>
+								<button 
+									class="icon-btn delete" 
+									on:click|stopPropagation={() => deleteEvent(event.id)}
+								>
 									<Trash2 size={16} />
 								</button>
 							</td>
 						</tr>
 					{/each}
 				{:else}
-					<tr><td colspan="5" class="empty-message">등록된 이벤트가 없습니다.</td></tr>
+					<tr><td colspan="6" class="empty-message">등록된 이벤트가 없습니다.</td></tr>
 				{/if}
 			</tbody>
 		</table>
@@ -192,24 +252,42 @@
 	<div class="modal-overlay" on:click={closeModal}>
 		<div class="modal-content" on:click|stopPropagation>
 			<div class="modal-header">
-				<h3>새 이벤트 작성</h3>
+				<h3>{isEditMode ? '이벤트 수정' : '새 이벤트 작성'}</h3>
 				<button class="close-btn" on:click={closeModal}><X size={20} /></button>
 			</div>
 			
 			<div class="modal-body">
 				<div class="form-group">
 					<label for="title">이벤트명</label>
-					<input type="text" id="title" bind:value={newEvent.title} placeholder="이벤트 제목을 입력하세요" />
+					<input type="text" id="title" bind:value={formData.title} placeholder="이벤트 제목을 입력하세요" />
 				</div>
 
 				<div class="form-row">
 					<div class="form-group">
 						<label for="startDate">시작일</label>
-						<input type="date" id="startDate" bind:value={newEvent.startDate} />
+						<input type="date" id="startDate" bind:value={formData.startDate} />
 					</div>
 					<div class="form-group">
 						<label for="endDate">종료일</label>
-						<input type="date" id="endDate" bind:value={newEvent.endDate} />
+						<input type="date" id="endDate" bind:value={formData.endDate} />
+					</div>
+				</div>
+
+				<div class="form-group">
+					<label for="description">이벤트 설명</label>
+					<textarea 
+						id="description" 
+						bind:value={formData.description} 
+						rows="3" 
+						placeholder="이벤트에 대한 상세 설명을 입력하세요."
+					></textarea>
+				</div>
+
+				<div class="form-group">
+					<label for="link">링크 URL (버튼 연결)</label>
+					<div class="input-with-icon">
+						<LinkIcon size={16} color="#718096" />
+						<input type="text" id="link" bind:value={formData.link} placeholder="https://..." />
 					</div>
 				</div>
 
@@ -218,7 +296,8 @@
 					<div style="height: 200px;">
 						<ImageUploader 
 							path="events" 
-							bind:imageUrl={newEvent.image} 
+							bind:imageUrl={formData.image} 
+							objectFit="cover"
 						/>
 					</div>
 				</div>
@@ -227,7 +306,7 @@
 			<div class="modal-footer">
 				<button class="cancel-btn" on:click={closeModal}>취소</button>
 				<button class="submit-btn" on:click={submitEvent} disabled={isSubmitting}>
-					{isSubmitting ? '저장 중...' : '등록하기'}
+					{isSubmitting ? '저장 중...' : (isEditMode ? '수정 완료' : '등록하기')}
 				</button>
 			</div>
 		</div>
@@ -249,13 +328,24 @@
 	table { width: 100%; border-collapse: collapse; min-width: 800px; }
 	th { text-align: left; padding: 16px 24px; background-color: #f7fafc; color: #718096; font-size: 12px; font-weight: 600; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; }
 	td { padding: 16px 24px; border-bottom: 1px solid #edf2f7; vertical-align: middle; font-size: 14px; color: #4a5568; }
-	tr:hover { background-color: #fafafa; }
+	tr:last-child td { border-bottom: none; }
+	
+	.clickable-row { cursor: pointer; transition: background 0.1s; }
+	.clickable-row:hover { background-color: #f0f4f8; }
 
 	.event-thumb { width: 60px; height: 40px; border-radius: 6px; overflow: hidden; background-color: #edf2f7; display: flex; align-items: center; justify-content: center; }
 	.event-thumb img { width: 100%; height: 100%; object-fit: cover; }
 	.no-img { color: #cbd5e0; }
-	.title-cell { font-weight: 600; color: #2d3748; }
+	
+	.event-info { display: flex; flex-direction: column; }
+	.title-text { font-weight: 600; color: #2d3748; }
+	.desc-text { font-size: 12px; color: #a0aec0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+
 	.period-badge { display: inline-block; background-color: #ebf8ff; color: #2c5282; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 500; }
+
+	.link-icon { color: #3182ce; transition: color 0.2s; }
+	.link-icon:hover { color: #2b6cb0; }
+	.no-link { color: #cbd5e0; }
 
 	.icon-btn { background: none; border: none; cursor: pointer; padding: 6px; border-radius: 4px; transition: background 0.2s; color: #a0aec0; }
 	.icon-btn:hover { background-color: #edf2f7; color: #4a5568; }
@@ -276,13 +366,17 @@
 	.close-btn { background: none; border: none; cursor: pointer; color: #a0aec0; }
 	.close-btn:hover { color: #4a5568; }
 
-	.modal-body { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+	.modal-body { padding: 24px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; max-height: 70vh; }
 	.form-group { display: flex; flex-direction: column; gap: 6px; }
 	.form-row { display: flex; gap: 16px; }
 	.form-row .form-group { flex: 1; }
 	label { font-size: 13px; font-weight: 600; color: #4a5568; }
-	input { padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 14px; }
+	input, textarea { padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 14px; width: 100%; box-sizing: border-box; }
+	textarea { resize: vertical; }
 	
+	.input-with-icon { display: flex; align-items: center; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0 10px; gap: 8px; }
+	.input-with-icon input { border: none; padding: 10px 0; outline: none; }
+
 	.modal-footer { padding: 16px 24px; background-color: #f7fafc; display: flex; justify-content: flex-end; gap: 12px; border-top: 1px solid #e2e8f0; }
 	.cancel-btn { background: white; border: 1px solid #e2e8f0; padding: 8px 16px; border-radius: 6px; cursor: pointer; color: #4a5568; font-weight: 500; }
 	.submit-btn { background: #3182ce; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; color: white; font-weight: 600; }
