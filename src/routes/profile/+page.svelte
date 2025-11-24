@@ -1,4 +1,9 @@
 <script>
+	import { onMount } from 'svelte';
+	import { user } from '$lib/stores'; // 로그인된 유저 정보
+	import { db } from '$lib/firebase'; // Firestore
+	import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+	import { goto } from '$app/navigation';
 	import { 
 		User, 
 		Settings, 
@@ -11,60 +16,104 @@
 		Crown 
 	} from 'lucide-svelte';
 
-	// 사용자 정보 (수정 가능)
-	let user = {
-		nickname: '대화장인',
-		age: 28,
-		image: 'https://placehold.co/200x200/333/fff?text=ME'
+	// 프로필 데이터 상태
+	let profile = {
+		nickname: '',
+		age: 20,
+		intro: '',
+		image: ''
 	};
 
-	// 수정 모드 토글
+	let isLoading = true;
 	let isEditing = false;
-	
-	// 수정 중인 임시 데이터
-	let editForm = {
-		nickname: user.nickname,
-		age: user.age
-	};
+	let editForm = {}; // 수정 시 임시 저장소
 
-	// 멤버십 정보
+	// 멤버십 정보 (아직은 임시 데이터 유지)
 	let membership = {
 		type: 'PRO 멤버십',
-		status: 'active', // active, none
+		status: 'active',
 		price: '9,900원',
 		nextBillingDate: '2025. 12. 01'
 	};
 
-	// 활동 통계
+	// 활동 통계 (아직은 임시 데이터 유지)
 	let stats = {
-		totalMeetings: 12, // 총 모임 참여 횟수
-		peopleMet: 45      // 만난 사람들 수
+		totalMeetings: 0,
+		peopleMet: 0
 	};
 
-	// 대화평 (받은 피드백 태그)
+	// 대화평 (아직은 임시 데이터 유지)
 	let reviews = [
-		{ id: 1, text: '👂 경청을 잘해요', count: 8, color: '#e3f2fd', textColor: '#1976d2' },
-		{ id: 2, text: '😄 유머 감각이 좋아요', count: 5, color: '#fff3e0', textColor: '#f57c00' },
-		{ id: 3, text: '💡 통찰력이 있어요', count: 3, color: '#e8f5e9', textColor: '#388e3c' },
-		{ id: 4, text: '🍯 목소리가 꿀', count: 2, color: '#f3e5f5', textColor: '#7b1fa2' }
+		{ id: 1, text: '👂 경청을 잘해요', count: 0, color: '#e3f2fd', textColor: '#1976d2' },
+		{ id: 2, text: '😄 유머 감각이 좋아요', count: 0, color: '#fff3e0', textColor: '#f57c00' },
+		{ id: 3, text: '💡 통찰력이 있어요', count: 0, color: '#e8f5e9', textColor: '#388e3c' },
+		{ id: 4, text: '🍯 목소리가 꿀', count: 0, color: '#f3e5f5', textColor: '#7b1fa2' }
 	];
 
-	// 수정 시작
+	// 유저 데이터 가져오기 및 초기화
+	$: if ($user) {
+		loadUserData($user);
+	} else if (!$user && !isLoading) {
+		// 로그아웃 상태라면 로그인 페이지로
+		// (레이아웃 로딩 속도 고려하여 isLoading 체크)
+	}
+
+	async function loadUserData(currentUser) {
+		try {
+			const userRef = doc(db, 'users', currentUser.uid);
+			const docSnap = await getDoc(userRef);
+
+			if (docSnap.exists()) {
+				// 이미 가입된 유저라면 DB 정보 로드
+				profile = { ...profile, ...docSnap.data() };
+			} else {
+				// 최초 로그인 유저라면 기본 정보로 DB 생성
+				const newProfile = {
+					nickname: currentUser.displayName || '익명 유저',
+					age: 20,
+					image: currentUser.photoURL || 'https://placehold.co/200x200/333/fff?text=ME',
+					email: currentUser.email,
+					createdAt: new Date().toISOString()
+				};
+				await setDoc(userRef, newProfile);
+				profile = newProfile;
+			}
+		} catch (error) {
+			console.error('프로필 로딩 실패:', error);
+		} finally {
+			isLoading = false;
+		}
+	}
+
+	// 수정 모드 시작
 	function startEdit() {
-		editForm = { ...user };
+		editForm = { ...profile };
 		isEditing = true;
 	}
 
-	// 저장 (실제로는 서버로 전송 필요)
-	function saveEdit() {
-		user = { ...editForm };
-		isEditing = false;
-		// TODO: API 호출하여 사용자 정보 업데이트
+	// 수정 사항 저장 (Firestore 업데이트)
+	async function saveEdit() {
+		if (!$user) return;
+
+		try {
+			const userRef = doc(db, 'users', $user.uid);
+			await updateDoc(userRef, {
+				nickname: editForm.nickname,
+				age: Number(editForm.age)
+			});
+			
+			// 로컬 상태 업데이트
+			profile = { ...profile, nickname: editForm.nickname, age: Number(editForm.age) };
+			isEditing = false;
+		} catch (error) {
+			console.error('저장 실패:', error);
+			alert('저장에 실패했습니다.');
+		}
 	}
 
-	// 이미지 변경 (임시 구현)
+	// 이미지 변경 (추후 스토리지 연동 필요)
 	function changeImage() {
-		alert('프로필 사진 변경 기능이 열립니다 (구현 예정)');
+		alert('프로필 사진 변경 기능은 추후 구현 예정입니다.');
 	}
 </script>
 
@@ -76,102 +125,112 @@
 		</button>
 	</header>
 
-	<section class="profile-section">
-		<div class="avatar-container">
-			<div class="avatar-wrapper">
-				<img src={user.image} alt="프로필 이미지" />
+	{#if isLoading}
+		<div class="loading-state">로딩 중...</div>
+	{:else if $user}
+		<section class="profile-section">
+			<div class="avatar-container">
+				<div class="avatar-wrapper">
+					<img src={profile.image} alt="프로필 이미지" />
+					{#if isEditing}
+						<button class="camera-btn" on:click={changeImage}>
+							<Camera size={16} />
+						</button>
+					{/if}
+				</div>
+			</div>
+
+			<div class="info-container">
 				{#if isEditing}
-					<button class="camera-btn" on:click={changeImage}>
-						<Camera size={16} />
-					</button>
+					<div class="edit-form">
+						<div class="input-group">
+							<label for="nickname">닉네임</label>
+							<input type="text" id="nickname" bind:value={editForm.nickname} />
+						</div>
+						<div class="input-group">
+							<label for="age">나이</label>
+							<input type="number" id="age" bind:value={editForm.age} />
+						</div>
+						<button class="save-btn" on:click={saveEdit}>
+							<Check size={16} /> 저장완료
+						</button>
+					</div>
+				{:else}
+					<div class="display-info">
+						<h3 class="nickname">
+							{profile.nickname} <span class="age">({profile.age}세)</span>
+						</h3>
+						<button class="edit-btn" on:click={startEdit}>
+							<Edit2 size={14} /> 수정
+						</button>
+					</div>
+					<p class="email-text">{$user.email}</p>
 				{/if}
 			</div>
-		</div>
+		</section>
 
-		<div class="info-container">
-			{#if isEditing}
-				<div class="edit-form">
-					<div class="input-group">
-						<label for="nickname">닉네임</label>
-						<input type="text" id="nickname" bind:value={editForm.nickname} />
+		<section class="stats-grid">
+			<div class="stat-card">
+				<div class="stat-icon bg-blue">
+					<MessageSquare size={20} color="#1976d2" />
+				</div>
+				<div class="stat-info">
+					<span class="stat-label">참여한 모임</span>
+					<span class="stat-value">{stats.totalMeetings}회</span>
+				</div>
+			</div>
+			<div class="stat-card">
+				<div class="stat-icon bg-orange">
+					<Users size={20} color="#f57c00" />
+				</div>
+				<div class="stat-info">
+					<span class="stat-label">만난 사람들</span>
+					<span class="stat-value">{stats.peopleMet}명</span>
+				</div>
+			</div>
+		</section>
+
+		<section class="section">
+			<h3 class="section-header">멤버십</h3>
+			<div class="membership-card">
+				<div class="card-header">
+					<div class="plan-info">
+						<Crown size={20} color="#FFD700" />
+						<span class="plan-name">{membership.type}</span>
 					</div>
-					<div class="input-group">
-						<label for="age">나이</label>
-						<input type="number" id="age" bind:value={editForm.age} />
-					</div>
-					<button class="save-btn" on:click={saveEdit}>
-						<Check size={16} /> 저장완료
+					<span class="active-badge">구독중</span>
+				</div>
+				<div class="card-body">
+					<p class="price-info">월 {membership.price}</p>
+					<p class="billing-date">다음 결제일: {membership.nextBillingDate}</p>
+				</div>
+				<div class="card-footer">
+					<button class="manage-btn">
+						<CreditCard size={14} /> 결제 관리
 					</button>
 				</div>
-			{:else}
-				<div class="display-info">
-					<h3 class="nickname">
-						{user.nickname} <span class="age">({user.age}세)</span>
-					</h3>
-					<button class="edit-btn" on:click={startEdit}>
-						<Edit2 size={14} /> 수정
-					</button>
-				</div>
-			{/if}
-		</div>
-	</section>
+			</div>
+		</section>
 
-	<section class="stats-grid">
-		<div class="stat-card">
-			<div class="stat-icon bg-blue">
-				<MessageSquare size={20} color="#1976d2" />
+		<section class="section">
+			<h3 class="section-header">나의 대화 스타일</h3>
+			<div class="review-tags">
+				{#each reviews as review}
+					<div 
+						class="tag" 
+						style="background-color: {review.color}; color: {review.textColor};"
+					>
+						{review.text} <span class="tag-count">+{review.count}</span>
+					</div>
+				{/each}
 			</div>
-			<div class="stat-info">
-				<span class="stat-label">참여한 모임</span>
-				<span class="stat-value">{stats.totalMeetings}회</span>
-			</div>
+		</section>
+	{:else}
+		<div class="empty-state">
+			<p>로그인이 필요한 서비스입니다.</p>
+			<a href="/login" class="login-link">로그인하러 가기</a>
 		</div>
-		<div class="stat-card">
-			<div class="stat-icon bg-orange">
-				<Users size={20} color="#f57c00" />
-			</div>
-			<div class="stat-info">
-				<span class="stat-label">만난 사람들</span>
-				<span class="stat-value">{stats.peopleMet}명</span>
-			</div>
-		</div>
-	</section>
-
-	<section class="section">
-		<h3 class="section-header">멤버십</h3>
-		<div class="membership-card">
-			<div class="card-header">
-				<div class="plan-info">
-					<Crown size={20} color="#FFD700" />
-					<span class="plan-name">{membership.type}</span>
-				</div>
-				<span class="active-badge">구독중</span>
-			</div>
-			<div class="card-body">
-				<p class="price-info">월 {membership.price}</p>
-				<p class="billing-date">다음 결제일: {membership.nextBillingDate}</p>
-			</div>
-			<div class="card-footer">
-				<button class="manage-btn">
-					<CreditCard size={14} /> 결제 관리
-				</button>
-			</div>
-		</div>
-	</section>
-
-	<section class="section">
-		<h3 class="section-header">나의 대화 스타일</h3>
-		<div class="review-tags">
-			{#each reviews as review}
-				<div 
-					class="tag" 
-					style="background-color: {review.color}; color: {review.textColor};"
-				>
-					{review.text} <span class="tag-count">+{review.count}</span>
-				</div>
-			{/each}
-		</div>
-	</section>
+	{/if}
 </div>
 
 <style>
@@ -201,6 +260,19 @@
 		color: #333;
 	}
 
+	.loading-state, .empty-state {
+		text-align: center;
+		padding: 40px 0;
+		color: #666;
+	}
+
+	.login-link {
+		display: inline-block;
+		margin-top: 10px;
+		color: #1976d2;
+		text-decoration: underline;
+	}
+
 	/* 프로필 섹션 */
 	.profile-section {
 		display: flex;
@@ -217,7 +289,7 @@
 		width: 100px;
 		height: 100px;
 		border-radius: 50%;
-		overflow: visible; /* 카메라 버튼 표시를 위해 visible 혹은 absolute 처리 필요 */
+		overflow: visible;
 		position: relative;
 		border: 3px solid white;
 		box-shadow: 0 4px 12px rgba(0,0,0,0.1);
@@ -250,6 +322,8 @@
 	.info-container {
 		width: 100%;
 		display: flex;
+		flex-direction: column;
+		align-items: center;
 		justify-content: center;
 	}
 
@@ -270,6 +344,12 @@
 		font-weight: normal;
 		font-size: 16px;
 		color: #666;
+	}
+
+	.email-text {
+		font-size: 13px;
+		color: #999;
+		margin: 4px 0 0 0;
 	}
 
 	.edit-btn {

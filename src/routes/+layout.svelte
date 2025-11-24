@@ -1,8 +1,9 @@
 <script>
 	import favicon from '$lib/assets/favicon.svg';
 	import { page } from '$app/stores';
-	import { Search, Home, MessageSquare, User, BookOpen } from 'lucide-svelte';
-
+	import { user } from '$lib/stores'; // user 스토어 임포트
+	import { Search, Home, MessageSquare, User, BookOpen, LogIn } from 'lucide-svelte';
+	
 	let { children } = $props();
 
 	// 현재 활성화된 탭인지 확인하는 헬퍼 함수
@@ -38,12 +39,24 @@
 			<MessageSquare size={24} />
 			<span>대화</span>
 		</a>
-		<a href="/profile" class="nav-item" class:active={isActive('/profile')}>
-			<div class="avatar-placeholder">
-				<User size={24} />
-			</div>
-			<span>내 프로필</span>
-		</a>
+
+		{#if $user}
+			<a href="/profile" class="nav-item" class:active={isActive('/profile')}>
+				<div class="avatar-placeholder">
+					{#if $user.photoURL}
+						<img src={$user.photoURL} alt="User" class="user-avatar" />
+					{:else}
+						<User size={24} />
+					{/if}
+				</div>
+				<span>내 프로필</span>
+			</a>
+		{:else}
+			<a href="/login" class="nav-item" class:active={isActive('/login')}>
+				<LogIn size={24} />
+				<span>로그인</span>
+			</a>
+		{/if}
 	</nav>
 </div>
 
@@ -134,5 +147,11 @@
 		align-items: center;
 		justify-content: center;
 		overflow: hidden;
+	}
+
+	.user-avatar {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
 	}
 </style>
