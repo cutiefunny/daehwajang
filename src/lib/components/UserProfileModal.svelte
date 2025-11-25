@@ -1,10 +1,16 @@
 <script>
 	import { createEventDispatcher } from 'svelte';
-	import { X, Briefcase, MessageSquare } from 'lucide-svelte';
+	import { user as currentUser } from '$lib/stores';
+	import { db } from '$lib/firebase'; // [추가] db import
+	import { collection, query, where, getDocs } from 'firebase/firestore'; // [추가] Firestore 함수
+	import { X, Briefcase, MessageSquare, MessageCircle } from 'lucide-svelte';
+	import ReviewModal from '$lib/components/ReviewModal.svelte';
 
-	export let user = {}; // 모달에 표시할 유저 정보
+	export let user = {}; // 모달에 표시할 타겟 유저
 
 	const dispatch = createEventDispatcher();
+	let showReviewModal = false;
+	let canReview = false; // [추가] 대화평 작성 가능 여부
 
 	function close() {
 		dispatch('close');
@@ -14,6 +20,53 @@
 		if (code === 'M') return '남성';
 		if (code === 'F') return '여성';
 		return '';
+	}
+
+	// [추가] 대화평 작성 권한 확인 (함께 참여한 지난 모임이 있는지)
+	async function checkReviewAvailability() {
+		canReview = false;
+		// 로그인 안 했거나 본인이면 불가
+		if (!$currentUser || $currentUser.uid === user.id) return;
+
+		try {
+			// 1. 나의 '승인된(accepted)' 참여 내역 가져오기
+			const myAppsQ = query(
+				collection(db, 'meeting_applications'),
+				where('userId', '==', $currentUser.uid),
+				where('status', '==', 'accepted')
+			);
+			
+			// 2. 상대방의 '승인된(accepted)' 참여 내역 가져오기
+			const targetAppsQ = query(
+				collection(db, 'meeting_applications'),
+				where('userId', '==', user.id),
+				where('status', '==', 'accepted')
+			);
+
+			const [mySnap, targetSnap] = await Promise.all([getDocs(myAppsQ), getDocs(targetAppsQ)]);
+
+			// 3. 비교를 위해 데이터 가공
+			const myMeetings = mySnap.docs.map(doc => ({ 
+				id: doc.data().meetingId, 
+				date: doc.data().meetingDate // 신청 시 저장된 모임 날짜
+			}));
+			const targetMeetingIds = new Set(targetSnap.docs.map(doc => doc.data().meetingId));
+
+			const now = new Date().toISOString();
+
+			// 4. 교집합 찾기 & 날짜 확인 (상대방도 참여했고, 이미 지난 모임인지)
+			canReview = myMeetings.some(meeting => 
+				targetMeetingIds.has(meeting.id) && meeting.date < now
+			);
+
+		} catch (error) {
+			console.error('대화평 가능 여부 확인 실패:', error);
+		}
+	}
+
+	// 유저 정보가 변경될 때마다 권한 다시 확인
+	$: if (user && $currentUser) {
+		checkReviewAvailability();
 	}
 </script>
 
@@ -68,17 +121,32 @@
 					</div>
 				</div>
 			{/if}
+
+			{#if canReview}
+				<div class="action-area">
+					<button class="review-trigger-btn" on:click={() => showReviewModal = true}>
+						<MessageCircle size={18} />
+						<span>대화평 남기기</span>
+					</button>
+				</div>
+			{/if}
 		</div>
 	</div>
 </div>
+
+{#if showReviewModal}
+	<ReviewModal 
+		targetUser={user} 
+		on:close={() => showReviewModal = false} 
+	/>
+{/if}
 
 <style>
 	.modal-overlay {
 		position: fixed; top: 0; left: 0; width: 100%; height: 100%;
 		background-color: rgba(0, 0, 0, 0.6); z-index: 2000;
 		display: flex; align-items: center; justify-content: center;
-		padding: 20px;
-		backdrop-filter: blur(2px);
+		padding: 20px; backdrop-filter: blur(2px);
 	}
 
 	.modal-content {
@@ -147,4 +215,16 @@
 	.stat-item { display: flex; flex-direction: column; align-items: center; }
 	.stat-item .label { font-size: 11px; color: #a0aec0; margin-bottom: 2px; }
 	.stat-item .value { font-size: 16px; font-weight: 800; color: #2d3748; }
+
+	.action-area { margin-top: 10px; }
+	.review-trigger-btn {
+		width: 100%; padding: 12px;
+		background-color: #333; color: white;
+		border: none; border-radius: 12px;
+		font-size: 14px; font-weight: 600;
+		display: flex; align-items: center; justify-content: center; gap: 8px;
+		cursor: pointer; transition: background-color 0.2s;
+	}
+	.review-trigger-btn:hover { background-color: #1a1a1a; }
+	.review-trigger-btn:active { transform: scale(0.98); }
 </style>

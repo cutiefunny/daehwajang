@@ -3,36 +3,37 @@
 	import { user } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { collection, query, where, getDocs, doc, getDoc, orderBy } from 'firebase/firestore';
-	import { Calendar, MapPin, Loader2, Plus } from 'lucide-svelte';
+	import { Calendar, MapPin, Loader2, Plus, Star, Check } from 'lucide-svelte'; // 아이콘 추가
 	import { goto } from '$app/navigation';
+	import MeetingReviewModal from '$lib/components/MeetingReviewModal.svelte'; // [추가]
 
 	// 탭 상태 관리
 	let activeTab = 'participating';
 	let participatingMeetings = [];
 	let appliedMeetings = [];
 	let isLoading = true;
-
-	// [수정] 중복 실행 방지를 위한 변수 추가
 	let loadedUserId = null;
 
-	// [수정] 유저 ID가 변경되었을 때만 데이터 가져오기 (무한 루프 방지)
+	// [추가] 리뷰 모달 상태
+	let showReviewModal = false;
+	let reviewTargetMeeting = null;
+
 	$: if ($user) {
 		if ($user.uid !== loadedUserId) {
 			loadedUserId = $user.uid;
 			fetchMyMeetings();
 		}
 	} else if (!$user && !isLoading) {
-		// 로그아웃 상태 처리
 		participatingMeetings = [];
 		appliedMeetings = [];
 		loadedUserId = null;
-		isLoading = false; // 로딩 상태 해제
+		isLoading = false;
 	}
 
 	async function fetchMyMeetings() {
 		isLoading = true;
 		try {
-			// 1. 내 신청 내역 가져오기 (최신순)
+			// 1. 내 신청 내역 가져오기
 			const q = query(
 				collection(db, 'meeting_applications'),
 				where('userId', '==', $user.uid),
@@ -40,6 +41,14 @@
 			);
 			const snapshot = await getDocs(q);
 			const applications = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+			// [추가] 1.5. 내가 작성한 후기 목록 가져오기 (중복 작성 방지용)
+			const reviewsQ = query(
+				collection(db, 'meeting_reviews'),
+				where('reviewerId', '==', $user.uid)
+			);
+			const reviewsSnap = await getDocs(reviewsQ);
+			const reviewedMeetingIds = new Set(reviewsSnap.docs.map(d => d.data().meetingId));
 
 			// 2. 각 신청 건에 대해 모임 상세 정보 가져오기
 			const promises = applications.map(async (app) => {
@@ -51,13 +60,19 @@
 					
 					if (meetingSnap.exists()) {
 						const meetingData = meetingSnap.data();
+						const meetingDate = new Date(meetingData.date);
+						const now = new Date();
+
 						return {
 							...app,
 							title: meetingData.title,
 							date: meetingData.date,
 							location: meetingData.location,
 							image: meetingData.image,
-							dday: calculateDday(meetingData.date)
+							dday: calculateDday(meetingData.date),
+							// [추가] 상태 플래그 계산
+							isPast: meetingDate < now, // 지난 모임 여부
+							hasReviewed: reviewedMeetingIds.has(app.meetingId) // 후기 작성 여부
 						};
 					}
 					return null;
@@ -79,6 +94,17 @@
 		} finally {
 			isLoading = false;
 		}
+	}
+
+	// [추가] 후기 작성 모달 열기
+	function openReviewModal(meeting) {
+		reviewTargetMeeting = meeting;
+		showReviewModal = true;
+	}
+
+	// [추가] 후기 작성 완료 시 목록 새로고침
+	function handleReviewComplete() {
+		fetchMyMeetings();
 	}
 
 	function calculateDday(dateStr) {
@@ -142,13 +168,17 @@
 			{#if participatingMeetings.length > 0}
 				{#each participatingMeetings as meeting}
 					<div class="meeting-card">
-						<div class="image-wrapper">
+						<div class="image-wrapper {meeting.isPast ? 'grayscale' : ''}">
 							<img src={meeting.image} alt={meeting.title} />
 							<span class="d-day-badge">{meeting.dday}</span>
 						</div>
 						<div class="content">
 							<div class="status-row">
-								<span class="status-badge confirmed">참여확정</span>
+								{#if meeting.isPast}
+									<span class="status-badge completed">참여완료</span>
+								{:else}
+									<span class="status-badge confirmed">참여확정</span>
+								{/if}
 							</div>
 							<h3 class="title">{meeting.title}</h3>
 							<div class="info-row">
@@ -157,6 +187,20 @@
 							<div class="info-row">
 								<MapPin size={14} /> <span>{meeting.location}</span>
 							</div>
+							
+							{#if meeting.isPast}
+								<div class="review-action">
+									{#if meeting.hasReviewed}
+										<div class="reviewed-badge">
+											<Check size={12} /> 후기 작성 완료
+										</div>
+									{:else}
+										<button class="review-btn" on:click={() => openReviewModal(meeting)}>
+											<Star size={12} /> 후기 작성
+										</button>
+									{/if}
+								</div>
+							{/if}
 						</div>
 					</div>
 				{/each}
@@ -199,8 +243,15 @@
 	</button>
 </div>
 
+{#if showReviewModal && reviewTargetMeeting}
+	<MeetingReviewModal 
+		meeting={reviewTargetMeeting} 
+		on:close={() => showReviewModal = false}
+		on:complete={handleReviewComplete}
+	/>
+{/if}
+
 <style>
-	/* 스타일은 기존과 동일 */
 	.page-container {
 		padding: 20px 16px;
 		padding-bottom: 80px;
@@ -260,7 +311,7 @@
 		overflow: hidden;
 		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 		border: 1px solid #f0f0f0;
-		height: 120px;
+		height: 130px; /* 높이 약간 증가 (버튼 공간 확보) */
 	}
 
 	.image-wrapper {
@@ -298,6 +349,7 @@
 		display: flex;
 		flex-direction: column;
 		justify-content: center;
+		position: relative;
 	}
 
 	.status-row {
@@ -321,6 +373,11 @@
 		color: #666;
 	}
 
+	.status-badge.completed {
+		background-color: #edf2f7;
+		color: #4a5568;
+	}
+
 	.title {
 		font-size: 16px;
 		font-weight: bold;
@@ -337,6 +394,36 @@
 		font-size: 12px;
 		color: #888;
 		margin-bottom: 2px;
+	}
+
+	/* 후기 버튼 스타일 */
+	.review-action {
+		margin-top: 8px;
+	}
+	.review-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		background-color: #3182ce;
+		color: white;
+		border: none;
+		padding: 6px 10px;
+		border-radius: 6px;
+		font-size: 11px;
+		font-weight: bold;
+		cursor: pointer;
+		transition: background 0.2s;
+	}
+	.review-btn:hover {
+		background-color: #2b6cb0;
+	}
+	.reviewed-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		color: #718096;
+		font-size: 11px;
+		font-weight: bold;
 	}
 
 	.empty-state, .loading-state {

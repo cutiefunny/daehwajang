@@ -1,7 +1,7 @@
 <script>
-	import { onMount, onDestroy, tick, afterUpdate } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
-	import { user, modal } from '$lib/stores';
+	import { user, modal } from '$lib/stores'; // [수정] modal 추가
 	import { db } from '$lib/firebase';
 	import { 
 		collection, 
@@ -12,7 +12,9 @@
 		serverTimestamp, 
 		doc, 
 		updateDoc,
-		getDoc 
+		getDoc,
+		arrayUnion, // [추가] 배열에 요소 추가
+		increment   // [추가] 숫자 증가
 	} from 'firebase/firestore';
 	import { Send, MoreVertical, Phone, ArrowLeft } from 'lucide-svelte';
 
@@ -24,14 +26,31 @@
 	let inputElement;
 	let unsubscribe = null;
 
-	// 1. 채팅방 정보 가져오기 (타이틀용)
-	async function fetchRoomInfo() {
-		const docRef = doc(db, 'chatRooms', roomId);
-		const docSnap = await getDoc(docRef);
-		if (docSnap.exists()) {
-			roomTitle = docSnap.data().title;
-		} else {
-			roomTitle = '존재하지 않는 방';
+	// 1. 채팅방 정보 가져오기 & 입장 처리 (참여자 등록)
+	async function fetchRoomInfoAndJoin() {
+		try {
+			const docRef = doc(db, 'chatRooms', roomId);
+			const docSnap = await getDoc(docRef);
+
+			if (docSnap.exists()) {
+				const data = docSnap.data();
+				roomTitle = data.title;
+
+				// [버그 수정] 현재 유저가 참여자 목록에 없으면 추가
+				if ($user && (!data.participants || !data.participants.includes($user.uid))) {
+					await updateDoc(docRef, {
+						participants: arrayUnion($user.uid), // 배열에 내 ID 추가 (중복 방지됨)
+						participantCount: increment(1)       // 참여자 수 1 증가
+					});
+					console.log('채팅방 참여자로 등록되었습니다.');
+				}
+			} else {
+				roomTitle = '존재하지 않는 방';
+				await modal.alert('존재하지 않는 채팅방입니다.');
+				history.back();
+			}
+		} catch (error) {
+			console.error("방 정보 로딩 실패:", error);
 		}
 	}
 
@@ -41,7 +60,6 @@
 			collection(db, 'chatRooms', roomId, 'messages'),
 			orderBy('createdAt', 'asc')
 		);
-
 		unsubscribe = onSnapshot(q, (snapshot) => {
 			messages = snapshot.docs.map(doc => ({
 				id: doc.id,
@@ -76,13 +94,16 @@
 				timestamp: serverTimestamp()
 			});
 
-		scrollToBottom();
-		inputElement.focus();
-	} catch (error) {
-		console.error('메시지 전송 실패:', error);
-		await modal.alert('전송에 실패했습니다.');
+			scrollToBottom();
+			inputElement.focus();
+		} catch (error) {
+			console.error('메시지 전송 실패:', error);
+			// [수정] alert -> modal.alert
+			await modal.alert('전송에 실패했습니다.');
+		}
 	}
-}	function scrollToBottom() {
+
+	function scrollToBottom() {
 		if (scrollContainer) {
 			scrollContainer.scrollTop = scrollContainer.scrollHeight;
 		}
@@ -90,12 +111,12 @@
 
 	function formatTime(timestamp) {
 		if (!timestamp) return '';
-		// Firestore Timestamp는 toDate() 메서드를 가짐
 		return timestamp.toDate().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
 	}
 
 	onMount(() => {
-		fetchRoomInfo();
+		// [수정] 단순 조회가 아니라 입장 처리까지 수행하는 함수 호출
+		fetchRoomInfoAndJoin();
 		subscribeToMessages();
 	});
 
@@ -159,7 +180,7 @@
 </div>
 
 <style>
-	/* 컨테이너가 부모 요소(app-content)의 높이를 가득 채우도록 설정 */
+	/* 기존 스타일 유지 */
 	.chat-room-container {
 		display: flex;
 		flex-direction: column;
@@ -168,7 +189,6 @@
 		position: relative;
 	}
 
-	/* 채팅방 상단 정보 바 */
 	.chat-info-bar {
 		height: 48px;
 		background-color: rgba(255, 255, 255, 0.9);
@@ -203,7 +223,6 @@
 		justify-content: center;
 	}
 
-	/* 메시지 리스트 */
 	.message-list {
 		flex: 1;
 		overflow-y: auto;
@@ -302,7 +321,6 @@
 		margin-bottom: 0;
 	}
 
-	/* 입력창: 하단 고정 */
 	.input-area {
 		background-color: white;
 		padding: 8px;
