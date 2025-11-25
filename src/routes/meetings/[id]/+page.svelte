@@ -1,7 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { user } from '$lib/stores';
+	import { user, modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { doc, getDoc, addDoc, collection, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 	import { ArrowLeft, Calendar, MapPin, User, CheckCircle, AlertCircle } from 'lucide-svelte';
@@ -34,7 +34,7 @@
 				// 데이터 로드 후 지도 초기화 (약간의 지연 필요)
 				setTimeout(() => initMap(meeting.location), 100);
 			} else {
-				alert('존재하지 않는 모임입니다.');
+				await modal.alert('존재하지 않는 모임입니다.');
 				history.back();
 			}
 		} catch (error) {
@@ -63,7 +63,7 @@
 
 	// 3. 모임 신청하기
 	async function applyForMeeting() {
-		if (!$user) return alert('로그인이 필요한 서비스입니다.');
+		if (!$user) return await modal.alert('로그인이 필요한 서비스입니다.');
 		if (isApplying) return;
 
 		if (!confirm('이 모임에 참여 신청하시겠습니까?')) return;
@@ -83,10 +83,10 @@
 			});
 
 			applicationStatus = 'pending';
-			alert('신청이 완료되었습니다! 호스트의 승인을 기다려주세요.');
+			await modal.alert('신청이 완료되었습니다! 호스트의 승인을 기다려주세요.');
 		} catch (error) {
 			console.error('신청 실패:', error);
-			alert('신청 중 오류가 발생했습니다.');
+			await modal.alert('신청 중 오류가 발생했습니다.');
 		} finally {
 			isApplying = false;
 		}
@@ -96,9 +96,9 @@
 	function initMap(address) {
 		if (!window.naver || !mapElement) return;
 
-		window.naver.maps.Service.geocode({ query: address }, (status, response) => {
+		window.naver.maps.Service.geocode({ query: address }, async (status, response) => {
             if (status !== window.naver.maps.Service.Status.OK) {
-                return alert('주소 검색 중 오류가 발생했습니다.');
+                return await modal.alert('주소 검색 중 오류가 발생했습니다.');
             }
 
             // [수정] 검색 결과가 있는지 확인하는 로직 추가

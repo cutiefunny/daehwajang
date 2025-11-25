@@ -1,5 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
+	import { modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { 
 		collection, getDocs, query, orderBy, addDoc, deleteDoc, doc, serverTimestamp, updateDoc 
@@ -70,7 +71,7 @@
 	// 배너 저장 (등록 또는 수정)
 	async function submitForm() {
 		if (!formData.image || !formData.startDate || !formData.endDate) {
-			return alert('이미지와 기간은 필수입니다.');
+			return await modal.alert('이미지와 기간은 필수입니다.');
 		}
 
 		isSubmitting = true;
@@ -87,7 +88,7 @@
 
 				// 로컬 목록 업데이트
 				banners = banners.map(b => b.id === formData.id ? { ...b, ...formData } : b);
-				alert('배너가 수정되었습니다.');
+				await modal.alert('배너가 수정되었습니다.');
 			} else {
 				// 등록 로직
 				await addDoc(collection(db, 'banners'), {
@@ -98,13 +99,13 @@
 					createdAt: serverTimestamp(),
 					postedAt: new Date().toISOString()
 				});
-				alert('배너가 등록되었습니다.');
+				await modal.alert('배너가 등록되었습니다.');
 				fetchBanners(); // 목록 새로고침
 			}
 			closeModal();
 		} catch (error) {
 			console.error("저장 실패:", error);
-			alert("저장 중 오류가 발생했습니다.");
+			await modal.alert("저장 중 오류가 발생했습니다.");
 		} finally {
 			isSubmitting = false;
 		}
@@ -116,7 +117,7 @@
 		try {
 			await deleteDoc(doc(db, 'banners', id));
 			banners = banners.filter(b => b.id !== id);
-			alert('삭제되었습니다.');
+			await modal.alert('삭제되었습니다.');
 		} catch (error) {
 			console.error("삭제 실패:", error);
 		}

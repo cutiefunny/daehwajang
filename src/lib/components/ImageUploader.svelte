@@ -3,9 +3,10 @@
 	import { storage } from '$lib/firebase';
 	import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 	import { UploadCloud, X, Image as ImageIcon } from 'lucide-svelte';
+	import { modal } from '$lib/stores'; // [추가] 모달 스토어 import
 
 	export let path = 'uploads'; 
-	export let imageUrl = '';    
+	export let imageUrl = ''; 	
 	export let maxWidth = 600;
 	
 	// 이미지를 꽉 채울지(cover), 다 보여줄지(contain) 결정하는 옵션
@@ -34,7 +35,8 @@
 
 		} catch (error) {
 			console.error('이미지 업로드 실패:', error);
-			alert('이미지 처리 중 오류가 발생했습니다.');
+			// [수정] alert 대신 커스텀 모달 사용
+			await modal.alert('이미지 처리 중 오류가 발생했습니다.');
 		} finally {
 			isUploading = false;
 			if (fileInput) fileInput.value = '';

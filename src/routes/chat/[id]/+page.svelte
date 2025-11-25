@@ -1,7 +1,7 @@
 <script>
 	import { onMount, onDestroy, tick, afterUpdate } from 'svelte';
 	import { page } from '$app/stores';
-	import { user } from '$lib/stores';
+	import { user, modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { 
 		collection, 
@@ -76,15 +76,13 @@
 				timestamp: serverTimestamp()
 			});
 
-			scrollToBottom();
-			inputElement.focus();
-		} catch (error) {
-			console.error('메시지 전송 실패:', error);
-			alert('전송에 실패했습니다.');
-		}
+		scrollToBottom();
+		inputElement.focus();
+	} catch (error) {
+		console.error('메시지 전송 실패:', error);
+		await modal.alert('전송에 실패했습니다.');
 	}
-
-	function scrollToBottom() {
+}	function scrollToBottom() {
 		if (scrollContainer) {
 			scrollContainer.scrollTop = scrollContainer.scrollHeight;
 		}

@@ -1,11 +1,11 @@
 <script>
 	import favicon from '$lib/assets/favicon.svg';
 	import { page } from '$app/stores';
-	import { user, appSettings } from '$lib/stores'; // appSettings 추가
+	import { user, appSettings } from '$lib/stores';
 	import { Search, Home, MessageSquare, User, BookOpen, LogIn } from 'lucide-svelte';
-	
-	let { children } = $props();
+	import ConfirmModal from '$lib/components/ConfirmModal.svelte'; // [추가]
 
+	let { children } = $props();
 	const isActive = (path) => $page.url.pathname === path;
 	let isAdminPage = $derived($page.url.pathname.startsWith('/admin'));
 </script>
@@ -14,10 +14,12 @@
 	<link rel="icon" href={favicon} />
 </svelte:head>
 
+<ConfirmModal />
+
 {#if isAdminPage}
-	{@render children()}
+    {@render children()}
 {:else}
-	<div class="app-container" style="background-color: {$appSettings.appBg ?? '#ffffff'};">
+    <div class="app-container" style="background-color: {$appSettings.appBg ?? '#ffffff'};">
 		
 		<header class="app-header" style="background-color: {$appSettings.headerFooterBg ?? '#ffffff'};">
 			<h1 class="logo">{$appSettings.logoText}</h1>
@@ -27,11 +29,11 @@
 		</header>
 
 		<main class="app-content">
-			{@render children()}
+            {@render children()}
 		</main>
 
 		<nav class="app-footer" style="background-color: {$appSettings.headerFooterBg ?? '#ffffff'};">
-			<a href="/" class="nav-item" class:active={isActive('/')}>
+            <a href="/" class="nav-item" class:active={isActive('/')}>
 				<Home size={24} />
 				<span>홈</span>
 			</a>
@@ -66,15 +68,14 @@
 {/if}
 
 <style>
-	/* CSS 스타일은 기존과 동일하게 유지하되, 
-	   background-color는 인라인 스타일이 우선 적용되므로 기본값은 무시됩니다. */
+    /* 기존 스타일 유지 */
 	:global(body) {
 		margin: 0;
 		padding: 0;
 		box-sizing: border-box;
 		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 		background-color: #f5f5f5;
-	}
+    }
 
 	.app-container {
 		display: flex;
@@ -82,7 +83,6 @@
 		height: 100vh;
 		max-width: 600px;
 		margin: 0 auto;
-		/* background-color: white; -> 인라인 스타일로 제어 */
 		box-shadow: 0 0 20px rgba(0, 0, 0, 0.05);
 	}
 
@@ -92,13 +92,10 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 0 16px;
-		border-bottom: 1px solid rgba(0,0,0,0.05); /* 테두리 연하게 조정 */
-		/* background-color: white; -> 인라인 스타일로 제어 */
+		border-bottom: 1px solid rgba(0,0,0,0.05);
 		flex-shrink: 0;
 	}
 
-	/* ... (나머지 스타일 기존 유지) ... */
-	
 	.logo { font-size: 20px; font-weight: bold; margin: 0; }
 	.icon-btn { background: none; border: none; cursor: pointer; padding: 4px; }
 	.app-content { flex: 1; overflow-y: auto; padding-bottom: 20px; }
@@ -108,8 +105,7 @@
 		display: flex;
 		justify-content: space-around;
 		align-items: center;
-		border-top: 1px solid rgba(0,0,0,0.05); /* 테두리 연하게 조정 */
-		/* background-color: white; -> 인라인 스타일로 제어 */
+		border-top: 1px solid rgba(0,0,0,0.05);
 		flex-shrink: 0;
 	}
 

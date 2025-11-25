@@ -1,5 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
+	import { modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { 
 		collection, getDocs, query, orderBy, doc, deleteDoc, getCountFromServer, where, documentId 
@@ -93,10 +94,10 @@
 		try {
 			await deleteDoc(doc(db, 'chatRooms', id));
 			chatRooms = chatRooms.filter(r => r.id !== id);
-			alert('삭제되었습니다.');
+			await modal.alert('삭제되었습니다.');
 		} catch (error) {
 			console.error("삭제 실패:", error);
-			alert("삭제 중 오류가 발생했습니다.");
+			await modal.alert("삭제 중 오류가 발생했습니다.");
 		}
 	}
 

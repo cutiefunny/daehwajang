@@ -1,5 +1,6 @@
 <script>
 	import { createEventDispatcher, onMount } from 'svelte';
+	import { modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { doc, updateDoc } from 'firebase/firestore';
 	import { X } from 'lucide-svelte';
@@ -38,10 +39,10 @@
 			
 			// status는 클라이언트에서 재계산 필요할 수 있으므로 부모에게 위임하거나 여기서 처리
 			dispatch('save', { ...formData, ...updates, date: isoDate });
-			alert('모임 정보가 수정되었습니다.');
+			await modal.alert('모임 정보가 수정되었습니다.');
 		} catch (error) {
 			console.error("수정 실패:", error);
-			alert("수정 중 오류가 발생했습니다.");
+			await modal.alert("수정 중 오류가 발생했습니다.");
 		} finally {
 			isSaving = false;
 		}

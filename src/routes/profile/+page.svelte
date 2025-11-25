@@ -1,6 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
-	import { user, appSettings } from '$lib/stores'; // [수정] appSettings 추가
+	import { user, appSettings, modal } from '$lib/stores'; // [수정] appSettings 추가
 	import { auth, db } from '$lib/firebase';
 	import { signOut } from 'firebase/auth';
 	import { doc, getDoc, setDoc, updateDoc, collection, query, where, getCountFromServer } from 'firebase/firestore';
@@ -166,12 +166,12 @@
 		isEditing = true;
 	}
 
-	function toggleInterest(interest) {
+	async function toggleInterest(interest) {
 		if (editForm.interests.includes(interest)) {
 			editForm.interests = editForm.interests.filter(i => i !== interest);
 		} else {
 			if (editForm.interests.length >= 5) {
-				return alert('관심사는 최대 5개까지 선택 가능합니다.');
+				return await modal.alert('관심사는 최대 5개까지 선택 가능합니다.');
 			}
 			editForm.interests = [...editForm.interests, interest];
 		}
@@ -196,19 +196,19 @@
 			isEditing = false;
 		} catch (error) {
 			console.error('저장 실패:', error);
-			alert('저장에 실패했습니다.');
+			await modal.alert('저장에 실패했습니다.');
 		}
 	}
 
-	function changeImage() {
-		alert('프로필 사진 변경 기능은 추후 구현 예정입니다.');
+	async function changeImage() {
+		await modal.alert('프로필 사진 변경 기능은 추후 구현 예정입니다.');
 	}
 
 	async function handleLogout() {
 		if (confirm('정말 로그아웃 하시겠습니까?')) {
 			try {
 				await signOut(auth);
-				alert('로그아웃 되었습니다.');
+				await modal.alert('로그아웃 되었습니다.');
 				goto('/login');
 			} catch (error) {
 				console.error('로그아웃 실패:', error);

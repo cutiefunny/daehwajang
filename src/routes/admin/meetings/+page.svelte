@@ -1,5 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
+	import { modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { collection, getDocs, query, orderBy, doc, deleteDoc } from 'firebase/firestore';
 	// [추가] Users 아이콘 import
@@ -77,7 +78,7 @@
 		try {
 			await deleteDoc(doc(db, 'meetings', id));
 			meetings = meetings.filter(m => m.id !== id);
-			alert('삭제되었습니다.');
+			await modal.alert('삭제되었습니다.');
 		} catch (error) { console.error(error); }
 	}
 

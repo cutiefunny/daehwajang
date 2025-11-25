@@ -1,5 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
+	import { modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 	import { Save, Type, Layers, Smartphone, Palette, Hash, Plus, X, Award } from 'lucide-svelte';
@@ -52,10 +53,10 @@
 	});
 
 	// --- 태그 관련 함수 ---
-	function addTag() {
+	async function addTag() {
 		const tag = newTag.trim();
 		if (!tag) return;
-		if (settings.interestTags.includes(tag)) return alert('이미 존재하는 태그입니다.');
+		if (settings.interestTags.includes(tag)) return await modal.alert('이미 존재하는 태그입니다.');
 		settings.interestTags = [...settings.interestTags, tag];
 		newTag = '';
 	}
@@ -72,8 +73,8 @@
 	}
 
 	// --- [추가] 뱃지 관련 함수 ---
-	function addBadge() {
-		if (!newBadge.text.trim()) return alert('뱃지 문구를 입력해주세요.');
+	async function addBadge() {
+		if (!newBadge.text.trim()) return await modal.alert('뱃지 문구를 입력해주세요.');
 		
 		const badgeToAdd = {
 			id: Date.now().toString(), // 고유 ID 생성
@@ -104,10 +105,10 @@
 		try {
 			const docRef = doc(db, 'settings', 'global');
 			await updateDoc(docRef, settings);
-			alert('설정이 저장되었습니다.');
+			await modal.alert('설정이 저장되었습니다.');
 		} catch (error) {
 			console.error('저장 실패:', error);
-			alert('저장 중 오류가 발생했습니다.');
+			await modal.alert('저장 중 오류가 발생했습니다.');
 		} finally {
 			isSaving = false;
 		}

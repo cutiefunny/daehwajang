@@ -2,7 +2,7 @@
 	import { auth } from '$lib/firebase';
 	import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 	import { goto } from '$app/navigation';
-	import { user } from '$lib/stores'; // 방금 만든 스토어
+	import { user, modal } from '$lib/stores'; // 방금 만든 스토어
 
 	// 이미 로그인되어 있다면 홈으로 리다이렉트
 	$: if ($user) {
@@ -16,7 +16,7 @@
 			// 로그인 성공 시 자동감지되어 스토어가 업데이트되고 홈으로 이동됨
 		} catch (error) {
 			console.error('로그인 실패:', error);
-			alert('로그인 중 오류가 발생했습니다.');
+			await modal.alert('로그인 중 오류가 발생했습니다.');
 		}
 	}
 </script>

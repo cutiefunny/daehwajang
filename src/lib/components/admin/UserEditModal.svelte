@@ -1,5 +1,6 @@
 <script>
 	import { createEventDispatcher } from 'svelte';
+	import { modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { doc, updateDoc } from 'firebase/firestore';
 	import { X } from 'lucide-svelte';
@@ -29,10 +30,10 @@
 			
 			// 부모에게 변경된 데이터 전달
 			dispatch('save', { ...formData, ...updates });
-			alert('회원 정보가 수정되었습니다.');
+			await modal.alert('회원 정보가 수정되었습니다.');
 		} catch (error) {
 			console.error("수정 실패:", error);
-			alert("수정 중 오류가 발생했습니다.");
+			await modal.alert("수정 중 오류가 발생했습니다.");
 		} finally {
 			isSaving = false;
 		}

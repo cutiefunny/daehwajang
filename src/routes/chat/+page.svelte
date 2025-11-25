@@ -1,6 +1,6 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
-	import { user } from '$lib/stores';
+	import { user, modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { 
 		collection, 
@@ -42,7 +42,7 @@
 
 	// 새 채팅방 만들기 (간단히 prompt로 제목 입력받기)
 	async function createChatRoom() {
-		if (!$user) return alert('로그인이 필요합니다!');
+		if (!$user) return await modal.alert('로그인이 필요합니다!');
 		
 		const title = prompt('새로운 채팅방 이름을 입력하세요:', '자유 대화방');
 		if (!title) return;
@@ -60,7 +60,7 @@
 			});
 		} catch (error) {
 			console.error('채팅방 생성 실패:', error);
-			alert('채팅방을 만들지 못했습니다.');
+			await modal.alert('채팅방을 만들지 못했습니다.');
 		}
 	}
 

@@ -1,5 +1,6 @@
 <script>
 	import { createEventDispatcher, onMount } from 'svelte';
+	import { modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	// [수정] getDoc 추가
 	import { collection, query, where, getDocs, doc, updateDoc, orderBy, getDoc } from 'firebase/firestore';
@@ -65,17 +66,15 @@
 			app.id === applicationId ? { ...app, status: newStatus } : app
 		);
 
-		try {
-			const appRef = doc(db, 'meeting_applications', applicationId);
-			await updateDoc(appRef, { status: newStatus });
-		} catch (error) {
-			console.error("상태 업데이트 실패:", error);
-			alert("상태 변경 중 오류가 발생했습니다.");
-			applicants = originalApplicants;
-		}
+	try {
+		const appRef = doc(db, 'meeting_applications', applicationId);
+		await updateDoc(appRef, { status: newStatus });
+	} catch (error) {
+		console.error("상태 업데이트 실패:", error);
+		await modal.alert("상태 변경 중 오류가 발생했습니다.");
+		applicants = originalApplicants;
 	}
-
-	function close() {
+}	function close() {
 		dispatch('close');
 	}
 

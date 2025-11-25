@@ -1,5 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
+	import { modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { 
 		collection, getDocs, query, orderBy, addDoc, deleteDoc, doc, serverTimestamp, updateDoc 
@@ -78,7 +79,7 @@
 	// 이벤트 저장
 	async function submitEvent() {
 		if (!formData.title || !formData.startDate || !formData.endDate) {
-			return alert('필수 정보를 모두 입력해주세요.');
+			return await modal.alert('필수 정보를 모두 입력해주세요.');
 		}
 
 		isSubmitting = true;
@@ -96,21 +97,21 @@
 				const eventRef = doc(db, 'events', formData.id);
 				await updateDoc(eventRef, eventData);
 				events = events.map(e => e.id === formData.id ? { ...e, ...eventData } : e);
-				alert('이벤트가 수정되었습니다.');
+				await modal.alert('이벤트가 수정되었습니다.');
 			} else {
 				await addDoc(collection(db, 'events'), {
 					...eventData,
 					createdAt: serverTimestamp(),
 					postedAt: new Date().toISOString()
 				});
-				alert('이벤트가 등록되었습니다.');
+				await modal.alert('이벤트가 등록되었습니다.');
 				fetchEvents();
 			}
 			
 			closeModal();
 		} catch (error) {
 			console.error("저장 실패:", error);
-			alert("저장 중 오류가 발생했습니다.");
+			await modal.alert("저장 중 오류가 발생했습니다.");
 		} finally {
 			isSubmitting = false;
 		}
@@ -122,7 +123,7 @@
 		try {
 			await deleteDoc(doc(db, 'events', id));
 			events = events.filter(e => e.id !== id);
-			alert('삭제되었습니다.');
+			await modal.alert('삭제되었습니다.');
 		} catch (error) {
 			console.error("삭제 실패:", error);
 		}

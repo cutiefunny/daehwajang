@@ -1,7 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { user } from '$lib/stores';
+	import { user, modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 	import { ArrowLeft, Calendar, MapPin, AlignLeft, Type, Grid } from 'lucide-svelte';
@@ -20,9 +20,9 @@
 	};
 
 	// 로그인 체크
-	onMount(() => {
+	onMount(async () => {
 		if (!$user) {
-			alert('모임을 개설하려면 로그인이 필요합니다.');
+			await modal.alert('모임을 개설하려면 로그인이 필요합니다.');
 			goto('/login');
 		}
 	});
@@ -34,11 +34,11 @@
 	// 모임 개설하기
 	async function handleSubmit() {
 		// 1. 유효성 검사
-		if (!formData.title.trim()) return alert('모임 이름을 입력해주세요.');
-		if (!formData.date) return alert('모임 일시를 선택해주세요.');
-		if (!formData.location.trim()) return alert('모임 장소를 입력해주세요.');
-		if (!formData.image) return alert('대표 이미지를 업로드해주세요.');
-		if (!$user) return alert('로그인 정보가 없습니다.');
+		if (!formData.title.trim()) return await modal.alert('모임 이름을 입력해주세요.');
+		if (!formData.date) return await modal.alert('모임 일시를 선택해주세요.');
+		if (!formData.location.trim()) return await modal.alert('모임 장소를 입력해주세요.');
+		if (!formData.image) return await modal.alert('대표 이미지를 업로드해주세요.');
+		if (!$user) return await modal.alert('로그인 정보가 없습니다.');
 
 		if (!confirm('이대로 모임을 개설하시겠습니까?')) return;
 
@@ -65,13 +65,13 @@
 
 			const docRef = await addDoc(collection(db, 'meetings'), meetingData);
 			
-			alert('모임이 성공적으로 개설되었습니다!');
+			await modal.alert('모임이 성공적으로 개설되었습니다!');
 			// 3. 생성된 모임 상세 페이지로 이동
 			goto(`/meetings/${docRef.id}`);
 
 		} catch (error) {
 			console.error('모임 생성 실패:', error);
-			alert('모임 개설 중 오류가 발생했습니다.');
+			await modal.alert('모임 개설 중 오류가 발생했습니다.');
 		} finally {
 			isSubmitting = false;
 		}
