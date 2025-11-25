@@ -19,31 +19,47 @@ export const appSettings = writable({
 function createModalStore() {
 	const { subscribe, set, update } = writable({
 		isOpen: false,
-		type: 'alert', // 'alert' | 'confirm'
+		type: 'alert', // 'alert' | 'confirm' | 'prompt'
 		message: '',
-		resolve: null // 사용자의 응답(true/false)을 기다리는 Promise의 resolve 함수
+		value: '',     // prompt 입력값
+		placeholder: '', // prompt placeholder
+		resolve: null
 	});
 
 	return {
 		subscribe,
-		// 알림창 (확인 버튼만 있음)
 		alert: (message) => {
 			return new Promise((resolve) => {
 				set({ isOpen: true, type: 'alert', message, resolve });
 			});
 		},
-		// 확인창 (확인/취소 버튼 있음)
 		confirm: (message) => {
 			return new Promise((resolve) => {
 				set({ isOpen: true, type: 'confirm', message, resolve });
 			});
 		},
-		// 닫기 (내부적으로 사용)
-		close: (result = false) => {
+		// [추가] 입력창 (확인 시 입력값 반환, 취소 시 null 반환)
+		prompt: (message, defaultValue = '', placeholder = '') => {
+			return new Promise((resolve) => {
+				set({ 
+					isOpen: true, 
+					type: 'prompt', 
+					message, 
+					value: defaultValue, 
+					placeholder, 
+					resolve 
+				});
+			});
+		},
+		close: (result) => {
 			update(state => {
 				if (state.resolve) state.resolve(result);
 				return { ...state, isOpen: false, resolve: null };
 			});
+		},
+		// 입력값 업데이트용 (컴포넌트에서 사용)
+		updateValue: (val) => {
+			update(state => ({ ...state, value: val }));
 		}
 	};
 }

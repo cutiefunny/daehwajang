@@ -1,6 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
-	import { user, appSettings, modal } from '$lib/stores'; // [수정] appSettings 추가
+	import { user, appSettings, modal } from '$lib/stores'; // [수정] modal 추가
 	import { auth, db } from '$lib/firebase';
 	import { signOut } from 'firebase/auth';
 	import { doc, getDoc, setDoc, updateDoc, collection, query, where, getCountFromServer } from 'firebase/firestore';
@@ -10,14 +10,13 @@
 		CreditCard, 
 		Users, 
 		MessageSquare, 
-		Camera, 
 		Check, 
 		Edit2,
 		Crown,
 		LogOut,
-		Briefcase,
-		Heart      
-	} from 'lucide-svelte';
+		Briefcase
+	} from 'lucide-svelte'; // Camera 아이콘 제거 (ImageUploader 사용)
+	import ImageUploader from '$lib/components/ImageUploader.svelte'; // [추가] 이미지 업로더 import
 
 	// 프로필 데이터 상태
 	let profile = {
@@ -34,7 +33,7 @@
 	let isEditing = false;
 	let editForm = {};
 
-	// [수정] 기본 태그 목록 (DB 값이 없을 때 사용)
+	// 기본 태그 목록
 	const defaultInterests = [
 		'운동', '러닝', '등산', '헬스', '요가',
 		'독서', '영화', '음악', '전시회', '사진',
@@ -43,7 +42,6 @@
 		'게임', '반려동물', '봉사', '드라이브'
 	];
 
-	// [수정] appSettings의 태그가 있으면 사용, 없으면 기본값 사용
 	$: interestOptions = $appSettings.interestTags && $appSettings.interestTags.length > 0 
 		? $appSettings.interestTags 
 		: defaultInterests;
@@ -107,7 +105,6 @@
 				}));
 				
 				stats.peopleMet = data.peopleMet || 0;
-
 			} else {
 				const newProfile = {
 					nickname: currentUser.displayName || '익명 유저',
@@ -144,7 +141,6 @@
 			const meetingCount = snapshot.data().count;
 
 			stats.totalMeetings = meetingCount;
-			
 			if (stats.peopleMet === 0 && meetingCount > 0) {
 				stats.peopleMet = meetingCount * 3; 
 			}
@@ -171,6 +167,7 @@
 			editForm.interests = editForm.interests.filter(i => i !== interest);
 		} else {
 			if (editForm.interests.length >= 5) {
+				// [수정] alert -> modal.alert
 				return await modal.alert('관심사는 최대 5개까지 선택 가능합니다.');
 			}
 			editForm.interests = [...editForm.interests, interest];
@@ -182,30 +179,33 @@
 
 		try {
 			const userRef = doc(db, 'users', $user.uid);
+			
+			// [수정] 업데이트 데이터에 image 필드 추가
 			const updateData = {
 				nickname: editForm.nickname,
 				age: Number(editForm.age),
 				gender: editForm.gender,
 				job: editForm.job,
-				interests: editForm.interests
+				interests: editForm.interests,
+				image: editForm.image // 이미지 URL 저장
 			};
 
 			await updateDoc(userRef, updateData);
 			
 			profile = { ...profile, ...updateData };
 			isEditing = false;
+			
+			// [수정] alert -> modal.alert
+			await modal.alert('프로필이 수정되었습니다.'); 
 		} catch (error) {
 			console.error('저장 실패:', error);
 			await modal.alert('저장에 실패했습니다.');
 		}
 	}
 
-	async function changeImage() {
-		await modal.alert('프로필 사진 변경 기능은 추후 구현 예정입니다.');
-	}
-
 	async function handleLogout() {
-		if (confirm('정말 로그아웃 하시겠습니까?')) {
+		// [수정] confirm -> modal.confirm
+		if (await modal.confirm('정말 로그아웃 하시겠습니까?')) {
 			try {
 				await signOut(auth);
 				await modal.alert('로그아웃 되었습니다.');
@@ -242,11 +242,14 @@
 		<section class="profile-section">
 			<div class="avatar-container">
 				<div class="avatar-wrapper">
-					<img src={profile.image} alt="프로필 이미지" />
 					{#if isEditing}
-						<button class="camera-btn" on:click={changeImage}>
-							<Camera size={16} />
-						</button>
+						<ImageUploader 
+							path="users" 
+							bind:imageUrl={editForm.image} 
+							objectFit="cover"
+						/>
+					{:else}
+						<img src={profile.image} alt="프로필 이미지" />
 					{/if}
 				</div>
 			</div>
@@ -412,9 +415,9 @@
 
 	.profile-section { display: flex; flex-direction: column; align-items: center; margin-bottom: 32px; }
 	.avatar-container { margin-bottom: 16px; }
-	.avatar-wrapper { width: 100px; height: 100px; border-radius: 50%; overflow: visible; position: relative; border: 3px solid white; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-	.avatar-wrapper img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
-	.camera-btn { position: absolute; bottom: 0; right: 0; background-color: #333; color: white; border: none; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 2px solid white; }
+	.avatar-wrapper { width: 100px; height: 100px; border-radius: 10%; overflow: visible; position: relative; border: 3px solid white; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+	
+	.avatar-wrapper img { width: 100%; height: 100%; object-fit: cover; }
 
 	.info-container { width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 	.display-info { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }

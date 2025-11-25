@@ -44,7 +44,7 @@
 	async function createChatRoom() {
 		if (!$user) return await modal.alert('로그인이 필요합니다!');
 		
-		const title = prompt('새로운 채팅방 이름을 입력하세요:', '자유 대화방');
+		const title = await modal.prompt('새로운 채팅방 이름을 입력하세요:', '자유 대화방');
 		if (!title) return;
 
 		try {
