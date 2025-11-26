@@ -17,6 +17,7 @@
 		Briefcase
 	} from 'lucide-svelte';
 	import ImageUploader from '$lib/components/ImageUploader.svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 
 	// 프로필 데이터 상태
 	let profile = {
@@ -236,7 +237,7 @@
 	</header>
 
 	{#if isLoading}
-		<div class="loading-state">로딩 중...</div>
+		<Skeleton />
 	{:else if $user}
 		<section class="profile-section">
 			<div class="avatar-container">
@@ -281,9 +282,10 @@
 							<input type="text" id="job" bind:value={editForm.job} placeholder="예: 개발자" />
 						</div>
 
-						<div class="input-group">
-							<label>관심사 (최대 5개)</label>
-							<div class="interest-selector">
+							<div class="input-group">
+								<fieldset class="interest-fieldset">
+								<legend class="interest-legend">관심사 (최대 5개)</legend>
+								<div class="interest-selector">
 								{#each interestOptions as option}
 									<button 
 										class="interest-chip {editForm.interests.includes(option) ? 'selected' : ''}"
@@ -293,6 +295,7 @@
 									</button>
 								{/each}
 							</div>
+						</fieldset>
 						</div>
 
 						<button class="save-btn" on:click={saveEdit}>
@@ -341,7 +344,8 @@
 				<div class="stat-info">
 					<span class="stat-label">참여한 모임</span>
 					<span class="stat-value">{stats.totalMeetings}회</span>
-				</div>
+					</div>
+
 			</div>
 			<div class="stat-card">
 				<div class="stat-icon bg-orange">
@@ -413,7 +417,7 @@
 	.icon-btn { background: none; border: none; cursor: pointer; padding: 6px; color: #333; border-radius: 50%; transition: background-color 0.2s; }
 	.icon-btn:hover { background-color: #f0f0f0; }
 	.logout-btn { color: #e53e3e; }
-	.loading-state, .empty-state { text-align: center; padding: 40px 0; color: #666; }
+	.empty-state { text-align: center; padding: 40px 0; color: #666; }
 	.login-link { display: inline-block; margin-top: 10px; color: #1976d2; text-decoration: underline; }
 
 	.profile-section { display: flex; flex-direction: column; align-items: center; margin-bottom: 32px; }

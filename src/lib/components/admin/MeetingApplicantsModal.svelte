@@ -5,6 +5,7 @@
 	// [수정] getDoc 추가
 	import { collection, query, where, getDocs, doc, updateDoc, orderBy, getDoc } from 'firebase/firestore';
 	import { X, Check, Ban, Loader2, User } from 'lucide-svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 
 	export let meeting = null;
 
@@ -90,8 +91,8 @@
 	});
 </script>
 
-<div class="modal-overlay" on:click={close}>
-	<div class="modal-content" on:click|stopPropagation>
+<div class="modal-overlay" role="button" tabindex="0" on:click={close} on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && close()}>
+	<div class="modal-content" role="dialog" aria-modal="true" tabindex="0" on:keydown={(e) => e.key === 'Escape' && close()} on:click|stopPropagation>
 		<div class="modal-header">
 			<div>
 				<h3>신청자 관리</h3>
@@ -102,9 +103,7 @@
 		
 		<div class="modal-body">
 			{#if isLoading}
-				<div class="loading-state">
-					<Loader2 size={24} class="spin" /> <span>명단을 불러오는 중...</span>
-				</div>
+				<Skeleton />
 			{:else if applicants.length > 0}
 				<div class="applicant-list">
 					{#each applicants as applicant (applicant.id)}
@@ -163,7 +162,7 @@
 
 	.modal-body { padding: 0; overflow-y: auto; flex: 1; background-color: #fff; }
 	
-	.loading-state, .empty-state { padding: 60px 20px; text-align: center; color: #a0aec0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+	.empty-state { padding: 60px 20px; text-align: center; color: #a0aec0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
 	.spin { animation: spin 1s linear infinite; }
 	@keyframes spin { 100% { transform: rotate(360deg); } }
 

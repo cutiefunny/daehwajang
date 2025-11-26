@@ -4,6 +4,7 @@
 	import { db } from '$lib/firebase';
 	import { doc, getDoc } from 'firebase/firestore';
 	import { ArrowLeft, Calendar, Link as LinkIcon } from 'lucide-svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 
 	const eventId = $page.params.id;
 	let event = null;
@@ -45,7 +46,7 @@
 	</header>
 
 	{#if isLoading}
-		<div class="loading">로딩 중...</div>
+		<Skeleton />
 	{:else if event}
 		<div class="content">
 			<div class="image-wrapper">
@@ -129,5 +130,5 @@
 	}
 	.action-btn:hover { background: #2b6cb0; }
 
-	.loading, .error { padding: 40px; text-align: center; color: #999; }
+	.error { padding: 40px; text-align: center; color: #999; }
 </style>

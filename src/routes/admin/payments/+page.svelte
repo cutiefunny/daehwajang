@@ -3,6 +3,7 @@
 	import { db } from '$lib/firebase';
 	import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 	import { Search, ChevronLeft, ChevronRight, Filter, Download } from 'lucide-svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 
 	let payments = [];
 	let isLoading = true;
@@ -140,7 +141,7 @@
 
 <div class="table-container">
 	{#if isLoading}
-		<div class="loading">데이터를 불러오는 중...</div>
+		<Skeleton />
 	{:else}
 		<table>
 			<thead>
@@ -317,5 +318,5 @@
 	.page-btn:disabled { color: #cbd5e0; cursor: not-allowed; }
 	.page-info { font-size: 13px; color: #4a5568; }
 
-	.loading, .empty-message { text-align: center; padding: 40px; color: #a0aec0; }
+	.empty-message { text-align: center; padding: 40px; color: #a0aec0; }
 </style>

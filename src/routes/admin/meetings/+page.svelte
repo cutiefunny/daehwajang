@@ -8,6 +8,7 @@
 	import MeetingEditModal from '$lib/components/admin/MeetingEditModal.svelte';
 	// [추가] 신청자 관리 모달 import
 	import MeetingApplicantsModal from '$lib/components/admin/MeetingApplicantsModal.svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 
 	let meetings = [];
 	let isLoading = true;
@@ -112,7 +113,7 @@
 
 <div class="table-container">
 	{#if isLoading}
-		<div class="loading">데이터를 불러오는 중...</div>
+		<Skeleton />
 	{:else}
 		<table>
 			<thead>
@@ -249,5 +250,5 @@
 	/* [추가] 신청자 관리 버튼 스타일 */
 	.icon-btn.applicants:hover { background-color: #E6FFFA; color: #2C7A7B; }
 	
-	.loading, .empty-message { text-align: center; padding: 40px; color: #a0aec0; }
+	.empty-message { text-align: center; padding: 40px; color: #a0aec0; }
 </style>

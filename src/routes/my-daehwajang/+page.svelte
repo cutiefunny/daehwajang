@@ -6,6 +6,7 @@
 	import { Calendar, MapPin, Loader2, Plus, Star, Check, Crown } from 'lucide-svelte';
 	import { goto } from '$app/navigation';
 	import MeetingReviewModal from '$lib/components/MeetingReviewModal.svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 
 	// 탭 관련 상태 제거하고 단일 리스트로 변경
 	let myMeetings = []; 
@@ -185,10 +186,7 @@
 
 	<div class="list-container">
 		{#if isLoading}
-			<div class="loading-state">
-				<Loader2 size={24} class="spin" />
-				<span>정보를 불러오는 중입니다...</span>
-			</div>
+			<Skeleton />
 		{:else if !$user}
 			<div class="empty-state">
 				<p>로그인이 필요한 서비스입니다.</p>
@@ -435,7 +433,7 @@
 		padding: 3px 0;
 	}
 
-	.empty-state, .loading-state {
+	.empty-state {
 		padding: 60px 0;
 		text-align: center;
 		color: #999;
@@ -447,8 +445,7 @@
 		gap: 10px;
 	}
 
-	.spin { animation: spin 1s linear infinite; }
-	@keyframes spin { 100% { transform: rotate(360deg); } }
+
 
 	.login-link {
 		color: #1976d2;

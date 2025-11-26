@@ -5,6 +5,7 @@
 	import { collection, getDocs, query, where, orderBy, doc, getDoc, getCountFromServer } from 'firebase/firestore';
 	import { user } from '$lib/stores';
 	import { Search, MapPin, Calendar, Plus, Loader2, SlidersHorizontal, Users, Crown } from 'lucide-svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 
 	let meetings = [];
 	let filteredMeetings = [];
@@ -187,10 +188,7 @@
 
 	<div class="meeting-list">
 		{#if isLoading}
-			<div class="loading-state">
-				<Loader2 size={32} class="spin" />
-				<p>모임을 불러오고 있습니다...</p>
-			</div>
+			<Skeleton />
 		{:else if filteredMeetings.length > 0}
 			{#each filteredMeetings as meeting, index (meeting.id)}
 				{#if shouldShowDivider(index)}
@@ -297,10 +295,7 @@
 		margin-bottom: 16px;
 	}
 
-	.search-icon {
-		color: #999;
-		margin-right: 8px;
-	}
+
 
 	.search-bar input {
 		flex: 1;
@@ -525,7 +520,7 @@
 		max-width: 180px;
 	}
 
-	.loading-state, .empty-state {
+	.empty-state {
 		padding: 60px 0;
 		text-align: center;
 		color: #999;
@@ -535,8 +530,7 @@
 		gap: 12px;
 	}
 
-	.spin { animation: spin 1s linear infinite; }
-	@keyframes spin { 100% { transform: rotate(360deg); } }
+
 
 	.reset-btn {
 		margin-top: 8px;

@@ -105,8 +105,8 @@
 	}
 </script>
 
-<div class="modal-overlay" on:click={close}>
-	<div class="modal-content" on:click|stopPropagation>
+<div class="modal-overlay" role="button" tabindex="0" on:click={close} on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && close()}>
+	<div class="modal-content" role="dialog" aria-modal="true" tabindex="0" on:keydown={(e) => e.key === 'Escape' && close()} on:click|stopPropagation>
 		<div class="modal-header">
 			<h3>모임 정보 수정</h3>
 			<button class="close-btn" on:click={close}><X size={20} /></button>
@@ -115,7 +115,7 @@
 		<div class="modal-body">
 			<div class="form-section">
 				<div class="form-group">
-					<label>대표 이미지</label>
+					<div class="form-label">대표 이미지</div>
 					<div style="height: 200px;">
 						<ImageUploader 
 							path="meetings" 
@@ -126,35 +126,35 @@
 				</div>
 
 				<div class="form-group">
-					<label>모임명</label>
-					<input type="text" bind:value={formData.title} />
+					<label for="meeting-title">모임명</label>
+					<input id="meeting-title" type="text" bind:value={formData.title} />
 				</div>
 
 				<div class="form-row">
 					<div class="form-group">
-						<label>카테고리</label>
-						<input type="text" bind:value={formData.category} />
+						<label for="meeting-category">카테고리</label>
+						<input id="meeting-category" type="text" bind:value={formData.category} />
 					</div>
 					<div class="form-group">
-						<label>호스트</label>
-						<input type="text" bind:value={formData.hostName} />
+						<label for="meeting-host">호스트</label>
+						<input id="meeting-host" type="text" bind:value={formData.hostName} />
 					</div>
 				</div>
 
 				<div class="form-row">
 					<div class="form-group">
-						<label>일시</label>
-						<input type="datetime-local" bind:value={formData.dateInput} />
+						<label for="meeting-date">일시</label>
+						<input id="meeting-date" type="datetime-local" bind:value={formData.dateInput} />
 					</div>
 					<div class="form-group">
-						<label>장소</label>
-						<input type="text" bind:value={formData.location} />
+						<label for="meeting-location">장소</label>
+						<input id="meeting-location" type="text" bind:value={formData.location} />
 					</div>
 				</div>
 
 				<div class="form-group">
-					<label>설명</label>
-					<textarea bind:value={formData.description} rows="3"></textarea>
+					<label for="meeting-description">설명</label>
+					<textarea id="meeting-description" bind:value={formData.description} rows="3"></textarea>
 				</div>
 			</div>
 

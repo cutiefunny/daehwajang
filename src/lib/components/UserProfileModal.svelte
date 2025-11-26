@@ -70,8 +70,8 @@
 	}
 </script>
 
-<div class="modal-overlay" on:click={close}>
-	<div class="modal-content" on:click|stopPropagation>
+<div class="modal-overlay" role="button" tabindex="0" on:click={close} on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && close()}>
+	<div class="modal-content" role="dialog" aria-modal="true" tabindex="0" on:keydown={(e) => e.key === 'Escape' && close()} on:click|stopPropagation>
 		<button class="close-btn" on:click={close}>
 			<X size={24} />
 		</button>

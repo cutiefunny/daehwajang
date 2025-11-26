@@ -5,6 +5,7 @@
 	import { db } from '$lib/firebase';
 	import { doc, getDoc, addDoc, collection, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 	import { ArrowLeft, Calendar, MapPin, User, CheckCircle, AlertCircle, Star } from 'lucide-svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 
 	const NAVER_CLIENT_ID = import.meta.env.VITE_NAVER_MAPS_CLIENT_ID;
 	const meetingId = $page.params.id;
@@ -209,7 +210,7 @@
 
 <div class="page-container">
 	{#if isLoading}
-		<div class="loading-screen">로딩 중...</div>
+		<Skeleton />
 	{:else if meeting}
 		<div class="hero-header">
 			<button class="back-btn" on:click={goBack}>
@@ -571,11 +572,5 @@
 		border: 1px solid #b2f5ea;
 	}
 
-	.loading-screen {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		height: 100vh;
-		color: #999;
-	}
+
 </style>

@@ -4,7 +4,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 
 export const user = writable(null);
-export const userProfile = writable(null); // [추가] Firestore 유저 프로필 스토어
+export const userProfile = writable(null);
 
 export const appSettings = writable({
 	logoText: '대화의 장',
@@ -14,6 +14,28 @@ export const appSettings = writable({
 	headerFooterBg: '#ffffff',
 	appBg: '#ffffff'
 });
+
+// [추가] 토스트 알림 스토어
+function createToastStore() {
+	const { subscribe, update } = writable([]);
+
+	return {
+		subscribe,
+		send: (message, type = 'info', duration = 3000) => {
+			const id = Math.random().toString(36).substr(2, 9);
+			update((toasts) => [...toasts, { id, message, type }]);
+
+			setTimeout(() => {
+				update((toasts) => toasts.filter((t) => t.id !== id));
+			}, duration);
+		},
+		remove: (id) => {
+			update((toasts) => toasts.filter((t) => t.id !== id));
+		}
+	};
+}
+
+export const toast = createToastStore();
 
 // 모달 스토어
 function createModalStore() {
@@ -69,7 +91,6 @@ onAuthStateChanged(auth, (currentUser) => {
 	user.set(currentUser);
 
 	if (currentUser) {
-		// [추가] 로그인 시 Firestore 유저 정보 실시간 구독
 		onSnapshot(doc(db, 'users', currentUser.uid), (docSnap) => {
 			if (docSnap.exists()) {
 				userProfile.set(docSnap.data());

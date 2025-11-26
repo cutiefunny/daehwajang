@@ -5,6 +5,7 @@
 	import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 	import { Save, Type, Layers, Smartphone, Palette, Hash, Plus, X, Award } from 'lucide-svelte';
 	import ImageUploader from '$lib/components/ImageUploader.svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 
 	let settings = {
 		logoText: '대화의 장',
@@ -125,7 +126,7 @@
 	</div>
 
 	{#if isLoading}
-		<div class="loading">설정을 불러오는 중...</div>
+		<Skeleton />
 	{:else}
 		<div class="settings-grid">
 			
@@ -170,9 +171,9 @@
 					<Award size={20} color="#4a5568" />
 					<h3>대화평 뱃지 관리</h3>
 				</div>
-				
+			
 				<div class="input-group">
-					<label>새 뱃지 만들기</label>
+					<h4>새 뱃지 만들기</h4>
 					<div class="badge-creator">
 						<div class="row-input-box">
 							<input 
@@ -277,7 +278,7 @@
 					<h3>스플래시 화면</h3>
 				</div>
 				<div class="input-group">
-					<label>스플래시 이미지</label>
+	                    <h4>스플래시 이미지</h4>
 					<div class="uploader-wrapper">
 						<ImageUploader 
 							path="settings" 
@@ -350,6 +351,6 @@
 	.hint { font-size: 12px; color: #718096; margin-top: 6px; }
 	.color-picker-box { display: flex; align-items: center; gap: 12px; }
 	.color-code { font-family: monospace; color: #4a5568; }
-	.loading { text-align: center; padding: 40px; color: #718096; }
+
 	.uploader-wrapper { height: 200px; }
 </style>

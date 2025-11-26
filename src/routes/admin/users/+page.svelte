@@ -4,6 +4,7 @@
 	import { collection, getDocs, query, orderBy, doc, updateDoc } from 'firebase/firestore';
 	import { Search, CheckCircle, XCircle, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-svelte';
 	import UserEditModal from '$lib/components/admin/UserEditModal.svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 
 	let users = [];
 	let isLoading = true;
@@ -96,7 +97,7 @@
 
 <div class="table-container">
 	{#if isLoading}
-		<div class="loading">데이터를 불러오는 중...</div>
+		<Skeleton />
 	{:else}
 		<table>
 			<thead>
@@ -210,5 +211,5 @@
 	.status-indicator.pending { color: #ed8936; }
 	.action-btn { padding: 6px 12px; border: 1px solid #e2e8f0; background: white; border-radius: 6px; font-size: 12px; cursor: pointer; }
 	.action-btn:hover { background-color: #edf2f7; border-color: #cbd5e0; }
-	.loading, .empty-message { text-align: center; padding: 40px; color: #a0aec0; }
+	.empty-message { text-align: center; padding: 40px; color: #a0aec0; }
 </style>

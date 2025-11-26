@@ -44,8 +44,8 @@
 	}
 </script>
 
-<div class="modal-overlay" on:click={close}>
-	<div class="modal-content" on:click|stopPropagation>
+<div class="modal-overlay" role="button" tabindex="0" on:click={close} on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && close()}>
+	<div class="modal-content" role="dialog" aria-modal="true" tabindex="0" on:keydown={(e) => e.key === 'Escape' && close()} on:click|stopPropagation>
 		<div class="modal-header">
 			<h3>회원 정보 수정</h3>
 			<button class="close-btn" on:click={close}><X size={20} /></button>
@@ -64,35 +64,35 @@
 				</div>
 				<div class="info-edit-section">
 					<div class="form-group">
-						<label>이메일 (수정불가)</label>
-						<input type="text" value={formData.email} disabled class="disabled-input" />
+						<label for="user-email">이메일 (수정불가)</label>
+						<input id="user-email" type="text" value={formData.email} disabled class="disabled-input" />
 					</div>
 					<div class="form-group">
-						<label>닉네임</label>
-						<input type="text" bind:value={formData.nickname} />
+						<label for="user-nickname">닉네임</label>
+						<input id="user-nickname" type="text" bind:value={formData.nickname} />
 					</div>
 					<div class="form-group">
-						<label>직업</label>
-						<input type="text" bind:value={formData.job} />
+						<label for="user-job">직업</label>
+						<input id="user-job" type="text" bind:value={formData.job} />
 					</div>
 				</div>
 			</div>
 
 			<div class="form-row three-col">
 				<div class="form-group">
-					<label>나이</label>
-					<input type="number" bind:value={formData.age} />
+					<label for="user-age">나이</label>
+					<input id="user-age" type="number" bind:value={formData.age} />
 				</div>
 				<div class="form-group">
-					<label>성별</label>
-					<select bind:value={formData.gender}>
+					<label for="user-gender">성별</label>
+					<select id="user-gender" bind:value={formData.gender}>
 						<option value="M">남성</option>
 						<option value="F">여성</option>
 					</select>
 				</div>
 				<div class="form-group">
-					<label>멤버십</label>
-					<select bind:value={formData.membership}>
+					<label for="user-membership">멤버십</label>
+					<select id="user-membership" bind:value={formData.membership}>
 						<option value="Basic">Basic</option>
 						<option value="Standard">Standard</option>
 						<option value="Pro">Pro</option>
@@ -101,7 +101,7 @@
 			</div>
 
 			<div class="form-group">
-				<label>상태</label>
+				<div class="form-label">상태</div>
 				<div class="radio-group">
 					<label class="radio-label">
 						<input type="radio" bind:group={formData.status} value="active" /> 

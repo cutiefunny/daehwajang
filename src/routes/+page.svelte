@@ -9,6 +9,7 @@
 	// [수정] Users 아이콘 추가
 	import { X, Briefcase, ChevronRight, Users } from 'lucide-svelte';
 	import UserProfileModal from '$lib/components/UserProfileModal.svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 
 	// 모임 슬라이더 옵션
 	let emblaOptions = { loop: false, align: 'start', containScroll: 'trimSnaps' };
@@ -229,7 +230,7 @@
 		<p class="section-desc">관심 있는 주제의 대화에 참여해보세요.</p>
 
 		{#if isLoading}
-			<div class="loading-box">데이터를 불러오는 중...</div>
+			<Skeleton />
 		{:else if meetings.length > 0}
 			<div class="embla" use:emblaCarouselSvelte={{ options: emblaOptions }}>
 				<div class="embla__container">
@@ -363,7 +364,7 @@
 
 	.section-desc { font-size: 14px; color: #666; margin: 0 0 16px 16px; }
 	
-	.loading-box, .empty-box { text-align: center; padding: 40px; color: #999; font-size: 14px; }
+	.empty-box { text-align: center; padding: 40px; color: #999; font-size: 14px; }
 
 	/* 이벤트 슬라이더 */
 	.event-section { margin-bottom: 32px; }

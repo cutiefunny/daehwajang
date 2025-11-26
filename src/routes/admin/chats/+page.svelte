@@ -6,6 +6,7 @@
 		collection, getDocs, query, orderBy, doc, deleteDoc, getCountFromServer, where, documentId 
 	} from 'firebase/firestore';
 	import { Search, MessageSquare, Trash2, Eye, Users, X, ChevronLeft, ChevronRight } from 'lucide-svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 
 	let chatRooms = [];
 	let isLoading = true;
@@ -145,7 +146,7 @@
 
 <div class="table-container">
 	{#if isLoading}
-		<div class="loading">데이터를 불러오는 중...</div>
+		<Skeleton />
 	{:else}
 		<table>
 			<thead>
@@ -231,8 +232,8 @@
 </div>
 
 {#if isModalOpen}
-	<div class="modal-overlay" on:click={closeModal}>
-		<div class="modal-content" on:click|stopPropagation>
+	<div class="modal-overlay" role="button" tabindex="0" on:click={closeModal} on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && closeModal()}>
+		<div class="modal-content" role="dialog" aria-modal="true" tabindex="0" on:keydown={(e) => e.key === 'Escape' && closeModal()} on:click|stopPropagation>
 			<div class="modal-header">
 				<h3>참여 멤버 목록 <span class="sub-title">({selectedRoomTitle})</span></h3>
 				<button class="close-btn" on:click={closeModal}><X size={20} /></button>
@@ -296,7 +297,7 @@
 	.monitor-btn:hover { background-color: #f7fafc; border-color: #cbd5e0; }
 	.icon-btn { background: none; border: none; cursor: pointer; padding: 6px; border-radius: 4px; color: #a0aec0; transition: color 0.2s; }
 	.icon-btn.delete:hover { color: #e53e3e; background-color: #fff5f5; }
-	.loading, .empty-message { text-align: center; padding: 40px; color: #a0aec0; }
+	.empty-message { text-align: center; padding: 40px; color: #a0aec0; }
 
 	.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center; }
 	.modal-content { background: white; width: 400px; max-height: 80vh; border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }

@@ -9,6 +9,7 @@
 		Search, Plus, Trash2, Calendar, Image as ImageIcon, X, Link as LinkIcon, ChevronLeft, ChevronRight
 	} from 'lucide-svelte';
 	import ImageUploader from '$lib/components/ImageUploader.svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 
 	let banners = [];
 	let isLoading = true;
@@ -158,7 +159,7 @@
 
 <div class="table-container">
 	{#if isLoading}
-		<div class="loading">데이터를 불러오는 중...</div>
+		<Skeleton />
 	{:else}
 		<table>
 			<thead>
@@ -234,8 +235,8 @@
 </div>
 
 {#if isModalOpen}
-	<div class="modal-overlay" on:click={closeModal}>
-		<div class="modal-content" on:click|stopPropagation>
+	<div class="modal-overlay" role="button" tabindex="0" on:click={closeModal} on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && closeModal()}>
+		<div class="modal-content" role="dialog" aria-modal="true" tabindex="0" on:keydown={(e) => e.key === 'Escape' && closeModal()} on:click|stopPropagation>
 			<div class="modal-header">
 				<h3>{isEditMode ? '배너 수정' : '새 배너 작성'}</h3>
 				<button class="close-btn" on:click={closeModal}><X size={20} /></button>
@@ -243,7 +244,7 @@
 			
 			<div class="modal-body">
 				<div class="form-group">
-					<label>배너 이미지 (필수)</label>
+					<div class="form-label">배너 이미지 (필수)</div>
 					<div style="height: 180px;">
 						<ImageUploader 
 							path="banners" 
@@ -321,7 +322,7 @@
 	.page-btn:hover:not(:disabled) { background-color: #f7fafc; }
 	.page-btn:disabled { color: #cbd5e0; cursor: not-allowed; }
 	.page-info { font-size: 13px; color: #4a5568; }
-	.loading, .empty-message { text-align: center; padding: 40px; color: #a0aec0; }
+	.empty-message { text-align: center; padding: 40px; color: #a0aec0; }
 
 	/* 모달 스타일 */
 	.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center; }

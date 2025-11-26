@@ -62,8 +62,8 @@
 	}
 </script>
 
-<div class="modal-overlay" on:click={close}>
-	<div class="modal-content" on:click|stopPropagation>
+<div class="modal-overlay" role="button" tabindex="0" on:click={close} on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && close()}>
+	<div class="modal-content" role="dialog" aria-modal="true" tabindex="0" on:keydown={(e) => e.key === 'Escape' && close()} on:click|stopPropagation>
 		<div class="header">
 			<h3>대화평 남기기</h3>
 			<button class="close-btn" on:click={close}><X size={20}/></button>
