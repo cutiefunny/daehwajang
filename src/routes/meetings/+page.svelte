@@ -2,8 +2,9 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { db } from '$lib/firebase';
-	import { collection, getDocs, query, where, orderBy, doc, getDoc } from 'firebase/firestore';
-	import { Search, MapPin, Calendar, Plus, Loader2, SlidersHorizontal } from 'lucide-svelte';
+	import { collection, getDocs, query, where, orderBy, doc, getDoc, getCountFromServer } from 'firebase/firestore';
+	import { user } from '$lib/stores';
+	import { Search, MapPin, Calendar, Plus, Loader2, SlidersHorizontal, Users, Crown } from 'lucide-svelte';
 
 	let meetings = [];
 	let filteredMeetings = [];
@@ -12,9 +13,13 @@
 	// 검색 및 필터 상태
 	let searchTerm = '';
 	let selectedCategory = '전체';
-	let isFilterOpen = false;
 
 	const categories = ['전체', '소셜', '취미', '운동', '독서', '여행', '기타'];
+
+	// 로그인 상태가 변경되면 목록을 다시 정렬
+	$: if ($user && meetings.length > 0) {
+		sortMeetings();
+	}
 
 	onMount(async () => {
 		await fetchMeetings();
@@ -31,11 +36,27 @@
 			);
 			
 			const querySnapshot = await getDocs(q);
+
+			// [추가] 내 신청 내역 미리 가져오기 (로그인 시)
+			let myApplications = {};
+			if ($user) {
+				try {
+					const myAppsQ = query(
+						collection(db, 'meeting_applications'),
+						where('userId', '==', $user.uid)
+					);
+					const myAppsSnap = await getDocs(myAppsQ);
+					myAppsSnap.forEach(doc => {
+						const data = doc.data();
+						myApplications[data.meetingId] = data.status; // 'pending' or 'accepted'
+					});
+				} catch (e) { console.error(e); }
+			}
 			
-			// [수정] 호스트 닉네임 최신화
-			meetings = await Promise.all(querySnapshot.docs.map(async (docSnap) => {
+			const loadedMeetings = await Promise.all(querySnapshot.docs.map(async (docSnap) => {
 				const data = docSnap.data();
 				
+				// 1. 호스트 정보
 				if (data.hostId) {
 					try {
 						const hostSnap = await getDoc(doc(db, 'users', data.hostId));
@@ -45,10 +66,31 @@
 					} catch (e) { console.error(e); }
 				}
 
-				return { id: docSnap.id, ...data };
+				// 2. 참여 인원
+				let currentParticipants = 0;
+				try {
+					const countQ = query(
+						collection(db, 'meeting_applications'),
+						where('meetingId', '==', docSnap.id),
+						where('status', '==', 'accepted')
+					);
+					const countSnap = await getCountFromServer(countQ);
+					currentParticipants = countSnap.data().count;
+				} catch (e) { console.error(e); }
+
+				return { 
+					id: docSnap.id, 
+					...data,
+					currentParticipants,
+					maxParticipants: data.maxParticipants || 5,
+					myStatus: myApplications[docSnap.id] || null // [추가] 내 상태 할당
+				};
 			}));
+
+			meetings = loadedMeetings;
 			
-			filterMeetings();
+			sortMeetings();
+			
 		} catch (error) {
 			console.error("모임 목록 로딩 실패:", error);
 		} finally {
@@ -56,7 +98,34 @@
 		}
 	}
 
-	// ... (filterMeetings, 반응형 필터, getRemainingTime, goToCreate 함수 유지) ...
+	function sortMeetings() {
+		if (!$user) {
+			filterMeetings();
+			return;
+		}
+
+		meetings.sort((a, b) => {
+			const aIsHost = a.hostId === $user.uid;
+			const bIsHost = b.hostId === $user.uid;
+
+			// 1순위: 내가 호스트인 모임
+			if (aIsHost && !bIsHost) return -1;
+			if (!aIsHost && bIsHost) return 1;
+
+			// 2순위: 내가 참여/요청 중인 모임 (호스트가 아닌 경우)
+			const aIsApplied = (a.myStatus === 'pending' || a.myStatus === 'accepted');
+			const bIsApplied = (b.myStatus === 'pending' || b.myStatus === 'accepted');
+
+			if (aIsApplied && !bIsApplied) return -1;
+			if (!aIsApplied && bIsApplied) return 1;
+			
+			// 3순위: 날짜순 (기본 정렬 유지)
+			return 0;
+		});
+
+		filterMeetings();
+	}
+
 	function filterMeetings() {
 		filteredMeetings = meetings.filter(meeting => {
 			const matchesSearch = (meeting.title?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
@@ -81,6 +150,13 @@
 
 	function goToCreate() {
 		goto('/meetings/new');
+	}
+
+	function shouldShowDivider(index) {
+		if (!$user || index === 0) return false;
+		const prev = filteredMeetings[index - 1];
+		const curr = filteredMeetings[index];
+		return (prev.hostId === $user.uid) && (curr.hostId !== $user.uid);
 	}
 </script>
 
@@ -116,7 +192,15 @@
 				<p>모임을 불러오고 있습니다...</p>
 			</div>
 		{:else if filteredMeetings.length > 0}
-			{#each filteredMeetings as meeting (meeting.id)}
+			{#each filteredMeetings as meeting, index (meeting.id)}
+				{#if shouldShowDivider(index)}
+					<div class="list-divider">
+						<div class="divider-line"></div>
+						<span class="divider-text">다른 모임 둘러보기</span>
+						<div class="divider-line"></div>
+					</div>
+				{/if}
+
 				<a href="/meetings/{meeting.id}" class="meeting-card">
 					<div class="image-wrapper">
 						<img src={meeting.image} alt={meeting.title} />
@@ -124,14 +208,39 @@
 					</div>
 					<div class="content">
 						<div class="top-row">
-							<span class="category-label">{meeting.category}</span>
-							<span class="host-name">by {meeting.hostName}</span>
+							<div class="badge-group">
+								<span class="category-label">{meeting.category}</span>
+								{#if meeting.hostId !== $user?.uid}
+									{#if meeting.myStatus === 'pending'}
+										<span class="status-pill pending">요청 중</span>
+									{:else if meeting.myStatus === 'accepted'}
+										<span class="status-pill accepted">참여 예정</span>
+									{/if}
+								{/if}
+							</div>
+							
+							<div class="host-wrapper">
+								{#if $user && $user.uid === meeting.hostId}
+									<span class="host-badge">
+										<Crown size={10} /> HOST
+									</span>
+								{/if}
+								<span class="host-name">by {meeting.hostName}</span>
+							</div>
 						</div>
+
 						<h3 class="title">{meeting.title}</h3>
+						
 						<div class="info-row">
-							<div class="info-item">
-								<Calendar size={14} /> 
-								<span>{new Date(meeting.date).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+							<div class="info-group">
+								<div class="info-item">
+									<Calendar size={14} /> 
+									<span>{new Date(meeting.date).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+								</div>
+								<div class="info-item participants">
+									<Users size={14} />
+									<span>{meeting.currentParticipants}/{meeting.maxParticipants}명</span>
+								</div>
 							</div>
 							<div class="info-item location">
 								<MapPin size={14} />
@@ -206,7 +315,6 @@
 		gap: 8px;
 		overflow-x: auto;
 		padding-bottom: 8px;
-		/* 스크롤바 숨기기 */
 		-ms-overflow-style: none;
 		scrollbar-width: none;
 	}
@@ -233,12 +341,29 @@
 		border-color: #333;
 	}
 
-	/* 리스트 영역 */
 	.meeting-list {
 		padding: 16px;
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
+	}
+
+	.list-divider {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		margin: 8px 0;
+		color: #a0aec0;
+		font-size: 13px;
+		font-weight: 500;
+	}
+	.divider-line {
+		flex: 1;
+		height: 1px;
+		background-color: #e2e8f0;
+	}
+	.divider-text {
+		color: #718096;
 	}
 
 	.meeting-card {
@@ -290,7 +415,7 @@
 		display: flex;
 		flex-direction: column;
 		justify-content: center;
-		min-width: 0; /* 텍스트 말줄임용 */
+		min-width: 0;
 	}
 
 	.top-row {
@@ -300,6 +425,13 @@
 		margin-bottom: 6px;
 	}
 
+	/* [추가] 뱃지 그룹 스타일 */
+	.badge-group {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+
 	.category-label {
 		font-size: 11px;
 		color: #3182ce;
@@ -307,6 +439,43 @@
 		padding: 2px 6px;
 		border-radius: 4px;
 		font-weight: bold;
+	}
+
+	/* [추가] 상태 뱃지 스타일 */
+	.status-pill {
+		font-size: 10px;
+		padding: 2px 6px;
+		border-radius: 4px;
+		font-weight: bold;
+	}
+	.status-pill.pending {
+		background-color: #fffaf0;
+		color: #dd6b20;
+		border: 1px solid #fbd38d;
+	}
+	.status-pill.accepted {
+		background-color: #f0fff4;
+		color: #38a169;
+		border: 1px solid #9ae6b4;
+	}
+
+	.host-wrapper {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.host-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 2px;
+		font-size: 10px;
+		padding: 2px 5px;
+		background-color: #FEFCBF;
+		color: #B7791F;
+		border-radius: 4px;
+		font-weight: 800;
+		border: 1px solid #F6E05E;
 	}
 
 	.host-name {
@@ -330,12 +499,23 @@
 		gap: 4px;
 	}
 
+	.info-group {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+	}
+
 	.info-item {
 		display: flex;
 		align-items: center;
 		gap: 6px;
 		font-size: 12px;
 		color: #718096;
+	}
+	
+	.info-item.participants {
+		font-weight: 600;
+		color: #4a5568;
 	}
 	
 	.info-item.location span {
@@ -345,7 +525,6 @@
 		max-width: 180px;
 	}
 
-	/* 상태 메시지 */
 	.loading-state, .empty-state {
 		padding: 60px 0;
 		text-align: center;
@@ -370,7 +549,6 @@
 		cursor: pointer;
 	}
 
-	/* FAB */
 	.fab {
 		position: fixed;
 		bottom: 80px;

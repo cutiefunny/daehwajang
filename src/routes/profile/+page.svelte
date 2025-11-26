@@ -1,6 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
-	import { user, appSettings, modal } from '$lib/stores'; // [수정] modal 추가
+	import { user, appSettings, modal } from '$lib/stores';
 	import { auth, db } from '$lib/firebase';
 	import { signOut } from 'firebase/auth';
 	import { doc, getDoc, setDoc, updateDoc, collection, query, where, getCountFromServer } from 'firebase/firestore';
@@ -15,8 +15,8 @@
 		Crown,
 		LogOut,
 		Briefcase
-	} from 'lucide-svelte'; // Camera 아이콘 제거 (ImageUploader 사용)
-	import ImageUploader from '$lib/components/ImageUploader.svelte'; // [추가] 이미지 업로더 import
+	} from 'lucide-svelte';
+	import ImageUploader from '$lib/components/ImageUploader.svelte';
 
 	// 프로필 데이터 상태
 	let profile = {
@@ -67,6 +67,9 @@
 		{ id: '3', text: '💡 통찰력이 있어요', count: 0, color: '#e8f5e9', textColor: '#388e3c' },
 		{ id: '4', text: '🍯 목소리가 꿀', count: 0, color: '#f3e5f5', textColor: '#7b1fa2' }
 	];
+
+	// [추가] 1표 이상 획득한 뱃지만 필터링
+	$: activeReviews = reviews.filter(r => r.count > 0);
 
 	$: if ($user) {
 		loadUserData($user);
@@ -167,7 +170,6 @@
 			editForm.interests = editForm.interests.filter(i => i !== interest);
 		} else {
 			if (editForm.interests.length >= 5) {
-				// [수정] alert -> modal.alert
 				return await modal.alert('관심사는 최대 5개까지 선택 가능합니다.');
 			}
 			editForm.interests = [...editForm.interests, interest];
@@ -180,14 +182,13 @@
 		try {
 			const userRef = doc(db, 'users', $user.uid);
 			
-			// [수정] 업데이트 데이터에 image 필드 추가
 			const updateData = {
 				nickname: editForm.nickname,
 				age: Number(editForm.age),
 				gender: editForm.gender,
 				job: editForm.job,
 				interests: editForm.interests,
-				image: editForm.image // 이미지 URL 저장
+				image: editForm.image
 			};
 
 			await updateDoc(userRef, updateData);
@@ -195,7 +196,6 @@
 			profile = { ...profile, ...updateData };
 			isEditing = false;
 			
-			// [수정] alert -> modal.alert
 			await modal.alert('프로필이 수정되었습니다.'); 
 		} catch (error) {
 			console.error('저장 실패:', error);
@@ -204,7 +204,6 @@
 	}
 
 	async function handleLogout() {
-		// [수정] confirm -> modal.confirm
 		if (await modal.confirm('정말 로그아웃 하시겠습니까?')) {
 			try {
 				await signOut(auth);
@@ -384,14 +383,18 @@
 		<section class="section">
 			<h3 class="section-header">나의 대화 스타일</h3>
 			<div class="review-tags">
-				{#each reviews as review}
-					<div 
-						class="tag" 
-						style="background-color: {review.color}; color: {review.textColor};"
-					>
-						{review.text} <span class="tag-count">+{review.count}</span>
-					</div>
-				{/each}
+				{#if activeReviews.length > 0}
+					{#each activeReviews as review}
+						<div 
+							class="tag" 
+							style="background-color: {review.color}; color: {review.textColor};"
+						>
+							{review.text} <span class="tag-count">+{review.count}</span>
+						</div>
+					{/each}
+				{:else}
+					<p class="empty-text">아직 받은 대화평이 없습니다.</p>
+				{/if}
 			</div>
 		</section>
 	{:else}
@@ -472,4 +475,7 @@
 	.review-tags { display: flex; flex-wrap: wrap; gap: 8px; }
 	.tag { padding: 8px 12px; border-radius: 20px; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
 	.tag-count { font-size: 11px; font-weight: bold; opacity: 0.8; }
+	
+	/* [추가] 빈 상태 텍스트 스타일 */
+	.empty-text { font-size: 14px; color: #999; margin: 0; }
 </style>

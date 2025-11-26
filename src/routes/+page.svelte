@@ -3,9 +3,11 @@
 	import { goto } from '$app/navigation';
 	import emblaCarouselSvelte from 'embla-carousel-svelte';
 	import { db } from '$lib/firebase';
-	import { collection, getDocs, query, orderBy, where, limit, doc, getDoc } from 'firebase/firestore';
+	// [수정] getCountFromServer 추가
+	import { collection, getDocs, query, orderBy, where, limit, doc, getDoc, getCountFromServer } from 'firebase/firestore';
 	import { appSettings, user } from '$lib/stores';
-	import { X, Briefcase, ChevronRight } from 'lucide-svelte';
+	// [수정] Users 아이콘 추가
+	import { X, Briefcase, ChevronRight, Users } from 'lucide-svelte';
 	import UserProfileModal from '$lib/components/UserProfileModal.svelte';
 
 	// 모임 슬라이더 옵션
@@ -53,24 +55,39 @@
 			);
 			const querySnapshot = await getDocs(q);
 			
-			// [수정] 호스트 닉네임 최신화 로직 추가
+			// [수정] 호스트 닉네임 및 참여 인원 카운트 로직 추가
 			const allMeetings = await Promise.all(querySnapshot.docs.map(async (docSnap) => {
 				const data = docSnap.data();
 				
-				// 호스트 정보 실시간 조회
+				// 1. 호스트 정보 최신화
 				if (data.hostId) {
 					try {
 						const hostSnap = await getDoc(doc(db, 'users', data.hostId));
 						if (hostSnap.exists()) {
 							const hostData = hostSnap.data();
-							data.hostName = hostData.nickname || data.hostName; // 닉네임 덮어쓰기
+							data.hostName = hostData.nickname || data.hostName;
 						}
-					} catch (e) {
-						console.error("호스트 정보 로딩 실패", e);
-					}
+					} catch (e) { console.error(e); }
 				}
 
-				return { id: docSnap.id, ...data };
+				// 2. [추가] 현재 참여 확정 인원 카운트
+				let currentParticipants = 0;
+				try {
+					const countQ = query(
+						collection(db, 'meeting_applications'),
+						where('meetingId', '==', docSnap.id),
+						where('status', '==', 'accepted')
+					);
+					const countSnap = await getCountFromServer(countQ);
+					currentParticipants = countSnap.data().count;
+				} catch (e) { console.error(e); }
+
+				return { 
+					id: docSnap.id, 
+					...data,
+					currentParticipants, // 현재 인원
+					maxParticipants: data.maxParticipants || 5 // 제한 인원 (기본값 5)
+				};
 			}));
 
 			let filteredMeetings = allMeetings;
@@ -88,7 +105,7 @@
 		finally { isLoading = false; }
 	}
 
-	// ... (나머지 함수 fetchActiveEvents, fetchRandomUsers, onEventInit, startAutoplay, checkAndShowBanner, closeBanner, getRemainingTime, openProfileModal 유지) ...
+	// ... (fetchActiveEvents, fetchRandomUsers, onEventInit, startAutoplay, checkAndShowBanner, closeBanner, getRemainingTime, openProfileModal 함수는 기존과 동일) ...
 	async function fetchActiveEvents() {
 		try {
 			const today = getLocalTodayString();
@@ -226,8 +243,14 @@
 								<div class="card-content">
 									<span class="badge">{meeting.category}</span>
 									<h3 class="card-title">{meeting.title}</h3>
-									<p class="card-host">by {meeting.hostName}</p> 
-									<p class="card-location">📍 {meeting.location}</p>
+									<p class="card-host">by {meeting.hostName}</p>
+									<div class="card-footer">
+										<p class="card-location">📍 {meeting.location}</p>
+										<div class="card-participants">
+											<Users size={12} />
+											<span>{meeting.currentParticipants}/{meeting.maxParticipants}</span>
+										</div>
+									</div>
 								</div>
 							</a>
 						</div>
@@ -312,7 +335,6 @@
 	.page-container { padding: 20px 0; }
 	.section { margin-bottom: 32px; }
 	
-	/* 섹션 헤더 스타일 */
 	.section-header {
 		display: flex;
 		justify-content: space-between;
@@ -381,9 +403,28 @@
 	.card-content { padding: 16px; flex: 1; display: flex; flex-direction: column; justify-content: center; }
 	.badge { display: inline-block; font-size: 12px; color: #555; background-color: #f0f0f0; padding: 4px 8px; border-radius: 4px; align-self: flex-start; margin-bottom: 6px; }
 	.card-title { font-size: 18px; font-weight: bold; margin: 0 0 4px 0; }
-	/* [추가] 호스트 이름 스타일 */
-	.card-host { font-size: 12px; color: #718096; margin: 0 0 4px 0; }
-	.card-location { font-size: 12px; color: #888; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.card-host { font-size: 12px; color: #718096; margin: 0 0 8px 0; }
+	
+	/* [수정] 카드 하단 정보 (위치+인원) */
+	.card-footer {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-top: auto;
+	}
+	.card-location { 
+		font-size: 12px; color: #888; margin: 0; 
+		white-space: nowrap; overflow: hidden; text-overflow: ellipsis; 
+		max-width: 65%;
+	}
+	.card-participants {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		font-size: 12px;
+		color: #4a5568;
+		font-weight: 500;
+	}
 
 	/* 랜덤 회원 리스트 */
 	.user-list-container {
