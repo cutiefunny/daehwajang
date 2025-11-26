@@ -1,15 +1,47 @@
 <script>
 	import favicon from '$lib/assets/favicon.svg';
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { user, appSettings } from '$lib/stores';
-	import { Search, Home, MessageSquare, User, BookOpen, LogIn } from 'lucide-svelte';
+	import { Search, Home, MessageSquare, User, BookOpen, LogIn, X } from 'lucide-svelte';
 	import ConfirmModal from '$lib/components/ConfirmModal.svelte';
-	import ToastContainer from '$lib/components/ToastContainer.svelte'; // [추가]
-	import { fade } from 'svelte/transition'; // [추가] 애니메이션용
+	import ToastContainer from '$lib/components/ToastContainer.svelte';
+	import { fade, slide } from 'svelte/transition';
 
 	let { children } = $props();
 	const isActive = (path) => $page.url.pathname === path;
 	let isAdminPage = $derived($page.url.pathname.startsWith('/admin'));
+
+	// [수정] Svelte 5 Runes 문법($state) 적용
+	let isSearchOpen = $state(false);
+	let globalSearchQuery = $state('');
+	let searchInputRef;
+
+	function toggleSearch() {
+		isSearchOpen = !isSearchOpen;
+		if (isSearchOpen) {
+			// 열릴 때 포커스
+			setTimeout(() => searchInputRef?.focus(), 100);
+		} else {
+			globalSearchQuery = '';
+		}
+	}
+
+	function handleGlobalSearch() {
+		if (!globalSearchQuery.trim()) return;
+		
+		// 모임 목록 페이지로 쿼리와 함께 이동
+		goto(`/meetings?q=${encodeURIComponent(globalSearchQuery)}`);
+		
+		// 검색창 닫기 및 초기화
+		isSearchOpen = false;
+		globalSearchQuery = '';
+	}
+
+	function handleKeydown(e) {
+		if (e.key === 'Enter') handleGlobalSearch();
+		if (e.key === 'Escape') toggleSearch();
+	}
 </script>
 
 <svelte:head>
@@ -17,28 +49,51 @@
 </svelte:head>
 
 <ConfirmModal />
-<ToastContainer /> {#if isAdminPage}
-    {@render children()}
+<ToastContainer />
+
+{#if isAdminPage}
+	{@render children()}
 {:else}
-    <div class="app-container" style="background-color: {$appSettings.appBg ?? '#ffffff'};">
+	<div class="app-container" style="background-color: {$appSettings.appBg ?? '#ffffff'};">
 		
 		<header class="app-header" style="background-color: {$appSettings.headerFooterBg ?? '#ffffff'};">
-			<h1 class="logo">{$appSettings.logoText}</h1>
-			<button class="icon-btn" aria-label="검색">
-				<Search size={24} />
-			</button>
+			<div class="header-top">
+				<h1 class="logo">{$appSettings.logoText}</h1>
+				<button class="icon-btn" aria-label="검색" on:click={toggleSearch}>
+					{#if isSearchOpen}
+						<X size={24} />
+					{:else}
+						<Search size={24} />
+					{/if}
+				</button>
+			</div>
+
+			{#if isSearchOpen}
+				<div class="header-search-area" transition:slide={{ duration: 200, axis: 'y' }}>
+					<div class="search-input-wrapper">
+						<Search size={18} class="search-icon-small" />
+						<input 
+							type="text" 
+							placeholder="모임명, 지역 등을 검색해보세요" 
+							bind:this={searchInputRef}
+							bind:value={globalSearchQuery}
+							on:keydown={handleKeydown}
+						/>
+					</div>
+				</div>
+			{/if}
 		</header>
 
 		<main class="app-content">
 			{#key $page.url.pathname}
 				<div class="page-transition-wrapper" in:fade={{ duration: 200, delay: 200 }} out:fade={{ duration: 200 }}>
-            		{@render children()}
+					{@render children()}
 				</div>
 			{/key}
 		</main>
 
 		<nav class="app-footer" style="background-color: {$appSettings.headerFooterBg ?? '#ffffff'};">
-            <a href="/" class="nav-item" class:active={isActive('/')}>
+			<a href="/" class="nav-item" class:active={isActive('/')}>
 				<Home size={24} />
 				<span>홈</span>
 			</a>
@@ -88,31 +143,68 @@
 		max-width: 600px;
 		margin: 0 auto;
 		box-shadow: 0 0 20px rgba(0, 0, 0, 0.05);
-		overflow: hidden; /* 애니메이션 시 스크롤바 방지 */
+		overflow: hidden;
 	}
 
 	.app-header {
+		display: flex;
+		flex-direction: column;
+		min-height: 60px;
+		justify-content: center;
+		border-bottom: 1px solid rgba(0,0,0,0.05);
+		flex-shrink: 0;
+		z-index: 10;
+		transition: all 0.2s;
+	}
+
+	.header-top {
 		height: 60px;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		padding: 0 16px;
-		border-bottom: 1px solid rgba(0,0,0,0.05);
-		flex-shrink: 0;
-		z-index: 10; /* 헤더가 콘텐츠 위에 오도록 */
+		width: 100%;
+		box-sizing: border-box;
+	}
+
+	.header-search-area {
+		padding: 0 16px 16px 16px;
+		width: 100%;
+		box-sizing: border-box;
+	}
+
+	.search-input-wrapper {
+		background-color: #f5f7fa;
+		border-radius: 12px;
+		padding: 10px 12px;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.search-icon-small {
+		color: #a0aec0;
+	}
+
+	.search-input-wrapper input {
+		border: none;
+		background: transparent;
+		width: 100%;
+		font-size: 14px;
+		outline: none;
+		color: #2d3748;
 	}
 
 	.logo { font-size: 20px; font-weight: bold; margin: 0; }
-	.icon-btn { background: none; border: none; cursor: pointer; padding: 4px; }
+	.icon-btn { background: none; border: none; cursor: pointer; padding: 4px; color: #333; display: flex; align-items: center; justify-content: center;}
 	
 	.app-content { 
 		flex: 1; 
 		overflow-y: auto; 
 		padding-bottom: 20px; 
-		position: relative; /* 절대 위치 자식 요소를 위해 */
+		position: relative;
 	}
 
-	/* [추가] 페이지 전환 래퍼 */
 	.page-transition-wrapper {
 		width: 100%;
 		min-height: 100%;

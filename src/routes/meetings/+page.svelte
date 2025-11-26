@@ -1,11 +1,11 @@
 <script>
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores'; // [추가] URL 파라미터 접근
 	import { db } from '$lib/firebase';
 	import { collection, getDocs, query, where, orderBy, doc, getDoc, getCountFromServer } from 'firebase/firestore';
 	import { user } from '$lib/stores';
 	import { Search, MapPin, Calendar, Plus, Loader2, SlidersHorizontal, Users, Crown } from 'lucide-svelte';
-	import Skeleton from '$lib/components/Skeleton.svelte';
 
 	let meetings = [];
 	let filteredMeetings = [];
@@ -16,6 +16,13 @@
 	let selectedCategory = '전체';
 
 	const categories = ['전체', '소셜', '취미', '운동', '독서', '여행', '기타'];
+
+	// [추가] URL 쿼리 파라미터 감지하여 검색어 자동 설정
+	// $page.url.searchParams.get('q') 값이 바뀌면 searchTerm에 반영됨 -> 아래 필터 로직 자동 실행
+	$: queryParam = $page.url.searchParams.get('q');
+	$: if (queryParam !== null) {
+		searchTerm = queryParam;
+	}
 
 	// 로그인 상태가 변경되면 목록을 다시 정렬
 	$: if ($user && meetings.length > 0) {
@@ -38,7 +45,7 @@
 			
 			const querySnapshot = await getDocs(q);
 
-			// [추가] 내 신청 내역 미리 가져오기 (로그인 시)
+			// 내 신청 내역 미리 가져오기 (로그인 시)
 			let myApplications = {};
 			if ($user) {
 				try {
@@ -84,13 +91,12 @@
 					...data,
 					currentParticipants,
 					maxParticipants: data.maxParticipants || 5,
-					myStatus: myApplications[docSnap.id] || null // [추가] 내 상태 할당
+					myStatus: myApplications[docSnap.id] || null
 				};
 			}));
 
 			meetings = loadedMeetings;
-			
-			sortMeetings();
+			sortMeetings(); // 데이터 로드 후 정렬 및 필터링 실행
 			
 		} catch (error) {
 			console.error("모임 목록 로딩 실패:", error);
@@ -113,14 +119,14 @@
 			if (aIsHost && !bIsHost) return -1;
 			if (!aIsHost && bIsHost) return 1;
 
-			// 2순위: 내가 참여/요청 중인 모임 (호스트가 아닌 경우)
+			// 2순위: 내가 참여/요청 중인 모임
 			const aIsApplied = (a.myStatus === 'pending' || a.myStatus === 'accepted');
 			const bIsApplied = (b.myStatus === 'pending' || b.myStatus === 'accepted');
 
 			if (aIsApplied && !bIsApplied) return -1;
 			if (!aIsApplied && bIsApplied) return 1;
 			
-			// 3순위: 날짜순 (기본 정렬 유지)
+			// 3순위: 날짜순
 			return 0;
 		});
 
@@ -137,7 +143,8 @@
 		});
 	}
 
-	$: if (searchTerm || selectedCategory) {
+	// 검색어 또는 카테고리가 변경될 때마다 필터링 실행
+	$: if (searchTerm !== undefined || selectedCategory) {
 		filterMeetings();
 	}
 
@@ -188,7 +195,10 @@
 
 	<div class="meeting-list">
 		{#if isLoading}
-			<Skeleton />
+			<div class="loading-state">
+				<Loader2 size={32} class="spin" />
+				<p>모임을 불러오고 있습니다...</p>
+			</div>
 		{:else if filteredMeetings.length > 0}
 			{#each filteredMeetings as meeting, index (meeting.id)}
 				{#if shouldShowDivider(index)}
@@ -251,7 +261,7 @@
 		{:else}
 			<div class="empty-state">
 				<p>조건에 맞는 모임이 없습니다 😢</p>
-				<button class="reset-btn" on:click={() => { searchTerm = ''; selectedCategory = '전체'; }}>
+				<button class="reset-btn" on:click={() => { searchTerm = ''; selectedCategory = '전체'; goto('/meetings'); }}>
 					필터 초기화
 				</button>
 			</div>
@@ -295,7 +305,10 @@
 		margin-bottom: 16px;
 	}
 
-
+	.search-icon {
+		color: #999;
+		margin-right: 8px;
+	}
 
 	.search-bar input {
 		flex: 1;
@@ -420,7 +433,6 @@
 		margin-bottom: 6px;
 	}
 
-	/* [추가] 뱃지 그룹 스타일 */
 	.badge-group {
 		display: flex;
 		align-items: center;
@@ -436,7 +448,6 @@
 		font-weight: bold;
 	}
 
-	/* [추가] 상태 뱃지 스타일 */
 	.status-pill {
 		font-size: 10px;
 		padding: 2px 6px;
@@ -520,7 +531,7 @@
 		max-width: 180px;
 	}
 
-	.empty-state {
+	.loading-state, .empty-state {
 		padding: 60px 0;
 		text-align: center;
 		color: #999;
@@ -530,7 +541,8 @@
 		gap: 12px;
 	}
 
-
+	.spin { animation: spin 1s linear infinite; }
+	@keyframes spin { 100% { transform: rotate(360deg); } }
 
 	.reset-btn {
 		margin-top: 8px;
