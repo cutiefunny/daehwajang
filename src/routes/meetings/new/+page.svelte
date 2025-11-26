@@ -4,8 +4,15 @@
 	import { user, modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-	import { ArrowLeft, Calendar, MapPin, AlignLeft, Type, Grid, Search } from 'lucide-svelte';
+	
+	// [수정] 카테고리 및 디자인용 아이콘 추가 임포트
+	import { 
+		ArrowLeft, Calendar, MapPin, AlignLeft, Type, Grid, Search, Users, Banknote, Info,
+		MessageCircle, Palette, Dumbbell, BookOpen, Plane, MoreHorizontal 
+	} from 'lucide-svelte';
+	
 	import ImageUploader from '$lib/components/ImageUploader.svelte';
+	import { fade, slide } from 'svelte/transition';
 
 	const NAVER_CLIENT_ID = import.meta.env.VITE_NAVER_MAPS_CLIENT_ID;
 
@@ -18,8 +25,20 @@
 		date: '',
 		location: '',
 		description: '',
-		image: ''
+		image: '',
+		maxParticipants: 4,
+		cost: ''
 	};
+
+	// [추가] 카테고리 데이터 정의 (아이콘 매핑)
+	const categories = [
+		{ value: '소셜', label: '소셜', icon: MessageCircle, color: '#4299e1' },
+		{ value: '취미', label: '취미', icon: Palette, color: '#ed8936' },
+		{ value: '운동', label: '운동', icon: Dumbbell, color: '#48bb78' },
+		{ value: '독서', label: '독서', icon: BookOpen, color: '#9f7aea' },
+		{ value: '여행', label: '여행', icon: Plane, color: '#0bc5ea' },
+		{ value: '기타', label: '기타', icon: MoreHorizontal, color: '#718096' }
+	];
 
 	// 지도 관련 상태
 	let mapElement;
@@ -27,7 +46,9 @@
 	let markerObject;
 	let isMapVisible = false;
 
-	// 로그인 체크
+	// 툴팁 상태
+	let showCostInfo = false;
+
 	onMount(async () => {
 		if (!$user) {
 			await modal.alert('모임을 개설하려면 로그인이 필요합니다.');
@@ -39,7 +60,7 @@
 		history.back();
 	}
 
-	// 주소 검색 및 지도 표시 함수
+	// 주소 검색
 	function searchLocation() {
 		if (!formData.location.trim()) return modal.alert('주소를 입력해주세요.');
 		if (!window.naver) return modal.alert('지도 서비스를 로드하는 중입니다. 잠시 후 다시 시도해주세요.');
@@ -54,11 +75,9 @@
 				return modal.alert('검색 결과가 없습니다. 도로명 주소나 지번 주소로 다시 시도해주세요.');
 			}
 
-			// 검색된 정확한 도로명 주소(없으면 지번)로 업데이트
 			const foundAddress = result.roadAddress || result.jibunAddress;
 			formData.location = foundAddress;
 			
-			// 지도 표시
 			const point = new window.naver.maps.LatLng(result.y, result.x);
 			isMapVisible = true;
 
@@ -84,11 +103,12 @@
 
 	// 모임 개설하기
 	async function handleSubmit() {
-		// 1. 유효성 검사
 		if (!formData.title.trim()) return await modal.alert('모임 이름을 입력해주세요.');
 		if (!formData.date) return await modal.alert('모임 일시를 선택해주세요.');
 		if (!formData.location.trim()) return await modal.alert('모임 장소를 입력해주세요.');
 		if (!formData.image) return await modal.alert('대표 이미지를 업로드해주세요.');
+		if (formData.maxParticipants < 2) return await modal.alert('모집 인원은 최소 2명 이상이어야 합니다.');
+		
 		if (!$user) return await modal.alert('로그인 정보가 없습니다.');
 
 		if (!confirm('이대로 모임을 개설하시겠습니까?')) return;
@@ -96,28 +116,24 @@
 		isSubmitting = true;
 
 		try {
-			// 2. Firestore에 저장
 			const meetingData = {
 				title: formData.title,
 				image: formData.image,
 				category: formData.category,
-				date: new Date(formData.date).toISOString(), // ISO 문자열로 변환
+				date: new Date(formData.date).toISOString(),
 				location: formData.location,
 				description: formData.description,
-				
-				// 호스트 정보 (현재 로그인한 유저)
+				maxParticipants: Number(formData.maxParticipants),
+				cost: formData.cost.trim() || '무료',
 				hostId: $user.uid,
 				hostName: $user.displayName || '익명 호스트',
 				hostImage: $user.photoURL || '',
-				
 				createdAt: serverTimestamp(),
-				status: 'upcoming' // 기본 상태
+				status: 'upcoming'
 			};
 
 			const docRef = await addDoc(collection(db, 'meetings'), meetingData);
-			
 			await modal.alert('모임이 성공적으로 개설되었습니다!');
-			// 3. 생성된 모임 상세 페이지로 이동
 			goto(`/meetings/${docRef.id}`);
 
 		} catch (error) {
@@ -139,19 +155,23 @@
 			<ArrowLeft size={24} />
 		</button>
 		<h1 class="page-title">새 모임 만들기</h1>
-		<div style="width: 24px;"></div> </header>
+		<div style="width: 24px;"></div>
+	</header>
 
 	<div class="content-body">
 		<div class="section image-section">
-			<label class="section-label">대표 이미지</label>
 			<div class="uploader-wrapper">
 				<ImageUploader 
 					path="meetings" 
 					bind:imageUrl={formData.image} 
 					objectFit="cover" 
 				/>
+				{#if !formData.image}
+					<div class="image-placeholder-text">
+						대표 이미지를 등록해주세요
+					</div>
+				{/if}
 			</div>
-			<p class="hint">모임의 분위기를 잘 나타내는 사진을 올려주세요.</p>
 		</div>
 
 		<div class="section">
@@ -161,7 +181,8 @@
 				</label>
 				<input 
 					type="text" 
-					placeholder="예: 주말 한강 러닝, 퇴근 후 독서 모임" 
+					class="input-field title-input"
+					placeholder="모임 이름을 입력해주세요" 
 					bind:value={formData.title} 
 				/>
 			</div>
@@ -170,14 +191,72 @@
 				<label>
 					<Grid size={16} /> 카테고리
 				</label>
-				<select bind:value={formData.category}>
-					<option value="소셜">👋 소셜/네트워킹</option>
-					<option value="취미">🎨 취미/원데이</option>
-					<option value="운동">🏃 운동/액티비티</option>
-					<option value="독서">📚 독서/스터디</option>
-					<option value="여행">✈️ 여행/나들이</option>
-					<option value="기타">🎸 기타</option>
-				</select>
+				<div class="category-grid">
+					{#each categories as cat}
+						<button 
+							type="button"
+							class="category-card" 
+							class:selected={formData.category === cat.value}
+							on:click={() => formData.category = cat.value}
+						>
+							<div 
+								class="cat-icon" 
+								style="background-color: {formData.category === cat.value ? cat.color : '#f7fafc'}; color: {formData.category === cat.value ? '#fff' : cat.color}"
+							>
+								<svelte:component this={cat.icon} size={20} />
+							</div>
+							<span class="cat-label">{cat.label}</span>
+						</button>
+					{/each}
+				</div>
+			</div>
+		</div>
+
+		<div class="section">
+			<div class="form-row">
+				<div class="input-group half">
+					<label>
+						<Users size={16} /> 모집 인원
+					</label>
+					<div class="number-input-wrapper">
+						<input 
+							type="number" 
+							min="2" 
+							max="100"
+							class="input-field"
+							bind:value={formData.maxParticipants} 
+						/>
+						<span class="unit">명</span>
+					</div>
+				</div>
+				<div class="input-group half">
+					<label class="label-with-tooltip">
+						<div class="label-content">
+							<Banknote size={16} /> 참가비
+						</div>
+						<div class="tooltip-wrapper">
+							<button 
+								type="button" 
+								class="info-icon" 
+								on:click={() => showCostInfo = !showCostInfo}
+								on:blur={() => setTimeout(() => showCostInfo = false, 200)} 
+							>
+								<Info size={14} />
+							</button>
+							{#if showCostInfo}
+								<div class="tooltip" transition:fade={{ duration: 200 }}>
+									참가비는 노쇼비를 포함하므로 환불 되지 않습니다
+								</div>
+							{/if}
+						</div>
+					</label>
+					<input 
+						type="text" 
+						class="input-field"
+						placeholder="금액 (선택)" 
+						bind:value={formData.cost} 
+					/>
+				</div>
 			</div>
 		</div>
 
@@ -188,26 +267,31 @@
 				</label>
 				<input 
 					type="datetime-local" 
+					class="input-field"
 					bind:value={formData.date} 
 				/>
 			</div>
 
 			<div class="input-group">
 				<label>
-					<MapPin size={16} /> 장소 검색
+					<MapPin size={16} /> 장소
 				</label>
 				<div class="search-wrapper">
 					<input 
 						type="text" 
-						placeholder="주소 또는 장소명 (예: 강남대로 396)" 
+						class="input-field"
+						placeholder="주소 또는 장소명 검색" 
 						bind:value={formData.location} 
 						on:keydown={(e) => e.key === 'Enter' && !e.isComposing && searchLocation()}
 					/>
 					<button type="button" class="search-btn" on:click={searchLocation}>
-						<Search size={18} />
+						<Search size={20} />
 					</button>
 				</div>
-				<div bind:this={mapElement} class="map-preview" class:visible={isMapVisible}></div>
+				
+				<div class="map-container" class:visible={isMapVisible} transition:slide>
+					<div bind:this={mapElement} class="map-view"></div>
+				</div>
 			</div>
 		</div>
 
@@ -217,7 +301,8 @@
 					<AlignLeft size={16} /> 상세 설명
 				</label>
 				<textarea 
-					rows="6" 
+					rows="8" 
+					class="input-field textarea"
 					placeholder="모임에 대한 자세한 설명을 적어주세요.&#13;&#10;(진행 방식, 준비물, 회비 등)"
 					bind:value={formData.description}
 				></textarea>
@@ -234,12 +319,12 @@
 
 <style>
 	.page-container {
-		background-color: #fff;
+		background-color: #f8f9fa; /* 배경색 변경 */
 		min-height: 100vh;
 		display: flex;
 		flex-direction: column;
 		position: relative;
-		padding-bottom: 80px; /* 하단 바 공간 확보 */
+		padding-bottom: 90px;
 	}
 
 	.header {
@@ -248,99 +333,237 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 0 16px;
-		border-bottom: 1px solid #f0f0f0;
 		background-color: white;
 		position: sticky;
 		top: 0;
 		z-index: 10;
+		box-shadow: 0 1px 2px rgba(0,0,0,0.03);
 	}
 
 	.back-btn {
 		background: none;
 		border: none;
 		cursor: pointer;
-		padding: 4px;
+		padding: 8px;
+		margin-left: -8px;
 		color: #333;
 	}
 
 	.page-title {
-		font-size: 18px;
-		font-weight: bold;
-		margin: 0;
+		font-size: 17px;
+		font-weight: 700;
 		color: #1a1a1a;
 	}
 
 	.content-body {
-		padding: 24px 20px;
 		display: flex;
 		flex-direction: column;
-		gap: 32px;
+		gap: 16px;
+		padding: 16px;
 	}
 
-	.section-label {
-		font-size: 14px;
-		font-weight: bold;
-		color: #1a1a1a;
-		margin-bottom: 12px;
-		display: block;
+	.section {
+		background-color: white;
+		padding: 20px;
+		border-radius: 16px;
+		box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+		display: flex;
+		flex-direction: column;
+		gap: 20px;
+	}
+
+	.image-section {
+		padding: 0;
+		overflow: hidden;
+		background: none;
+		box-shadow: none;
 	}
 
 	.uploader-wrapper {
 		width: 100%;
-		height: 200px;
-		border-radius: 12px;
+		height: 220px;
+		border-radius: 16px;
 		overflow: hidden;
-		background-color: #f9f9f9;
+		background-color: #e2e8f0;
+		position: relative;
+		box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+	}
+	
+	.image-placeholder-text {
+		position: absolute;
+		bottom: 16px;
+		left: 0; 
+		right: 0;
+		text-align: center;
+		color: #718096;
+		font-size: 13px;
+		pointer-events: none;
 	}
 
-	.hint {
+	/* 라벨 스타일 */
+	label {
+		font-size: 14px;
+		font-weight: 600;
+		color: #2d3748;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		margin-bottom: 8px;
+	}
+
+	/* 공통 입력 필드 스타일 */
+	.input-field {
+		width: 100%;
+		padding: 12px 14px;
+		border: 1px solid #e2e8f0;
+		border-radius: 10px;
+		font-size: 15px;
+		background-color: #fff;
+		box-sizing: border-box;
+		outline: none;
+		transition: all 0.2s;
+		color: #2d3748;
+	}
+
+	.input-field:focus {
+		border-color: #3182ce;
+		box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.1);
+	}
+
+	.title-input {
+		font-size: 16px;
+		font-weight: 500;
+	}
+
+	/* 카테고리 그리드 스타일 */
+	.category-grid {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 10px;
+	}
+
+	.category-card {
+		background-color: white;
+		border: 1px solid #e2e8f0;
+		border-radius: 12px;
+		padding: 12px 4px;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 8px;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.category-card:hover {
+		background-color: #f7fafc;
+	}
+
+	.category-card.selected {
+		border-color: #3182ce;
+		background-color: #ebf8ff;
+		box-shadow: 0 0 0 1px #3182ce;
+	}
+
+	.cat-icon {
+		width: 36px;
+		height: 36px;
+		border-radius: 50%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: all 0.2s;
+	}
+
+	.cat-label {
 		font-size: 12px;
-		color: #888;
-		margin-top: 8px;
+		font-weight: 600;
+		color: #4a5568;
+	}
+	.category-card.selected .cat-label {
+		color: #2b6cb0;
 	}
 
+	/* 폼 레이아웃 */
+	.form-row {
+		display: flex;
+		gap: 12px;
+	}
 	.input-group {
 		display: flex;
 		flex-direction: column;
-		gap: 8px;
-		margin-bottom: 20px;
+	}
+	.input-group.half {
+		flex: 1;
 	}
 
-	.input-group:last-child {
-		margin-bottom: 0;
+	.number-input-wrapper {
+		position: relative;
 	}
-
-	.input-group label {
+	.unit {
+		position: absolute;
+		right: 12px;
+		top: 50%;
+		transform: translateY(-50%);
 		font-size: 14px;
-		font-weight: 600;
-		color: #4a5568;
+		color: #718096;
+		pointer-events: none;
+	}
+
+	/* 툴팁 스타일 */
+	.label-with-tooltip {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		width: 100%;
+	}
+	.label-content {
 		display: flex;
 		align-items: center;
 		gap: 6px;
 	}
+	.tooltip-wrapper {
+		position: relative;
+	}
+	.info-icon {
+		background: none;
+		border: none;
+		padding: 4px;
+		cursor: pointer;
+		color: #a0aec0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: color 0.2s;
+	}
+	.info-icon:hover { color: #718096; }
 
-	input, select, textarea {
-		padding: 12px 14px;
-		border: 1px solid #e2e8f0;
+	.tooltip {
+		position: absolute;
+		bottom: 100%;
+		right: 0; /* 오른쪽 정렬로 변경하여 화면 밖으로 나가는 것 방지 */
+		background-color: rgba(45, 55, 72, 0.95);
+		color: white;
+		padding: 8px 12px;
 		border-radius: 8px;
-		font-size: 15px;
-		width: 100%;
-		box-sizing: border-box;
-		background-color: #fff;
-		outline: none;
-		transition: border-color 0.2s;
+		font-size: 12px;
+		white-space: nowrap;
+		margin-bottom: 8px;
+		z-index: 50;
+		box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+		pointer-events: none;
+	}
+	.tooltip::after {
+		content: '';
+		position: absolute;
+		top: 100%;
+		right: 6px;
+		border-width: 5px;
+		border-style: solid;
+		border-color: rgba(45, 55, 72, 0.95) transparent transparent transparent;
 	}
 
-	input:focus, select:focus, textarea:focus {
-		border-color: #3182ce;
-	}
-
-	textarea {
-		resize: none;
-		line-height: 1.5;
-	}
-
-	/* 주소 검색 스타일 */
+	/* 지도 및 검색 */
 	.search-wrapper {
 		display: flex;
 		gap: 8px;
@@ -349,34 +572,48 @@
 		background-color: #3182ce;
 		color: white;
 		border: none;
-		border-radius: 8px;
+		border-radius: 10px;
 		width: 48px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		cursor: pointer;
 		flex-shrink: 0;
+		transition: background 0.2s;
 	}
-	.map-preview {
-		width: 100%;
+	.search-btn:hover { background-color: #2b6cb0; }
+
+	.map-container {
 		height: 0;
-		background-color: #f0f0f0;
-		border-radius: 8px;
 		overflow: hidden;
-		transition: height 0.3s;
-		margin-top: 4px;
+		transition: height 0.3s ease;
+		border-radius: 12px;
+		margin-top: 0;
 	}
-	.map-preview.visible {
+	.map-container.visible {
 		height: 200px;
+		margin-top: 12px;
 		border: 1px solid #e2e8f0;
 	}
+	.map-view {
+		width: 100%;
+		height: 100%;
+		background-color: #f0f0f0;
+	}
 
+	.textarea {
+		resize: none;
+		line-height: 1.6;
+		min-height: 120px;
+	}
+
+	/* 하단 고정 버튼 */
 	.bottom-bar {
 		position: fixed;
 		bottom: 0;
 		left: 0;
 		right: 0;
-		max-width: 600px; /* 앱 레이아웃 width */
+		max-width: 600px;
 		margin: 0 auto;
 		background-color: white;
 		padding: 16px 20px;
@@ -389,20 +626,23 @@
 		padding: 16px;
 		border-radius: 12px;
 		font-size: 16px;
-		font-weight: bold;
+		font-weight: 700;
 		border: none;
 		cursor: pointer;
 		background-color: #3182ce;
 		color: white;
-		transition: background-color 0.2s;
+		transition: all 0.2s;
+		box-shadow: 0 4px 6px rgba(49, 130, 206, 0.2);
 	}
 
 	.submit-btn:disabled {
 		background-color: #cbd5e0;
 		cursor: not-allowed;
+		box-shadow: none;
 	}
 
 	.submit-btn:active:not(:disabled) {
 		background-color: #2b6cb0;
+		transform: translateY(1px);
 	}
 </style>

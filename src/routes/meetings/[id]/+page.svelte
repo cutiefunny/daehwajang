@@ -4,34 +4,59 @@
 	import { user, modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { doc, getDoc, addDoc, collection, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
-	import { ArrowLeft, Calendar, MapPin, User, CheckCircle, AlertCircle } from 'lucide-svelte';
+	import { ArrowLeft, Calendar, MapPin, User, CheckCircle, AlertCircle, Star } from 'lucide-svelte';
 
 	const NAVER_CLIENT_ID = import.meta.env.VITE_NAVER_MAPS_CLIENT_ID;
 	const meetingId = $page.params.id;
 
 	let meeting = null;
+	let reviews = [];
 	let isLoading = true;
 	let isApplying = false;
-	let applicationStatus = null; // null (미신청), 'pending' (대기), 'accepted' (확정)
+	let applicationStatus = null; 
+	let isMeetingPast = false;
 
 	let mapElement;
 
 	onMount(async () => {
 		await fetchMeeting();
+		await fetchReviews();
 		if ($user) {
 			await checkApplicationStatus();
 		}
 	});
 
-	// 1. 모임 상세 정보 가져오기
+	// 1. 모임 상세 정보 가져오기 (호스트 닉네임 최신화 포함)
 	async function fetchMeeting() {
 		try {
 			const docRef = doc(db, 'meetings', meetingId);
 			const docSnap = await getDoc(docRef);
 
 			if (docSnap.exists()) {
-				meeting = { id: docSnap.id, ...docSnap.data() };
-				// 데이터 로드 후 지도 초기화 (약간의 지연 필요)
+				let data = docSnap.data();
+
+				// [수정] 호스트의 최신 닉네임/이미지 가져오기
+				if (data.hostId) {
+					try {
+						const hostSnap = await getDoc(doc(db, 'users', data.hostId));
+						if (hostSnap.exists()) {
+							const hostData = hostSnap.data();
+							// 닉네임이 있으면 덮어쓰기
+							data.hostName = hostData.nickname || data.hostName;
+							data.hostImage = hostData.image || data.hostImage;
+						}
+					} catch (e) {
+						console.error("호스트 정보 갱신 실패:", e);
+					}
+				}
+
+				meeting = { id: docSnap.id, ...data };
+				
+				// 지난 모임인지 확인
+				const meetingDate = new Date(meeting.date);
+				const now = new Date();
+				isMeetingPast = meetingDate < now;
+
 				setTimeout(() => initMap(meeting.location), 100);
 			} else {
 				await modal.alert('존재하지 않는 모임입니다.');
@@ -41,6 +66,53 @@
 			console.error('모임 로딩 실패:', error);
 		} finally {
 			isLoading = false;
+		}
+	}
+
+	// [수정] 1.5. 모임 후기 가져오기 (작성자 닉네임 최신화 포함)
+	async function fetchReviews() {
+		try {
+			const q = query(
+				collection(db, 'meeting_reviews'),
+				where('meetingId', '==', meetingId)
+			);
+			const snapshot = await getDocs(q);
+			
+			// 각 후기마다 작성자(users) 정보를 조회하여 최신 닉네임 반영
+			const reviewsData = await Promise.all(snapshot.docs.map(async (docSnap) => {
+				const data = docSnap.data();
+				let currentReviewerName = data.reviewerName;
+
+				if (data.reviewerId) {
+					try {
+						const userSnap = await getDoc(doc(db, 'users', data.reviewerId));
+						if (userSnap.exists()) {
+							const userData = userSnap.data();
+							if (userData.nickname) {
+								currentReviewerName = userData.nickname;
+							}
+						}
+					} catch (e) {
+						console.error("리뷰어 정보 로딩 실패:", e);
+					}
+				}
+
+				return {
+					id: docSnap.id,
+					...data,
+					reviewerName: currentReviewerName // 최신 닉네임으로 교체
+				};
+			}));
+			
+			// 최신순 정렬
+			reviews = reviewsData.sort((a, b) => {
+				const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
+				const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
+				return dateB - dateA;
+			});
+				
+		} catch (error) {
+			console.error('후기 로딩 실패:', error);
 		}
 	}
 
@@ -72,13 +144,13 @@
 		try {
 			await addDoc(collection(db, 'meeting_applications'), {
 				meetingId: meetingId,
-				meetingTitle: meeting.title, // 나중에 목록 표시용
-				meetingDate: meeting.date,   // 정렬용
+				meetingTitle: meeting.title, 
+				meetingDate: meeting.date,   
 				userId: $user.uid,
 				userName: $user.displayName || '익명',
 				userEmail: $user.email,
 				userImage: $user.photoURL,
-				status: 'pending', // 초기 상태는 승인 대기
+				status: 'pending', 
 				appliedAt: serverTimestamp()
 			});
 
@@ -97,35 +169,24 @@
 		if (!window.naver || !mapElement) return;
 
 		window.naver.maps.Service.geocode({ query: address }, async (status, response) => {
-            if (status !== window.naver.maps.Service.Status.OK) {
-                return await modal.alert('주소 검색 중 오류가 발생했습니다.');
-            }
+			if (status !== window.naver.maps.Service.Status.OK) return;
 
-            // [수정] 검색 결과가 있는지 확인하는 로직 추가
-            const result = response.v2.addresses[0];
-            
-            if (!result) {
-                // 검색 결과가 없을 경우 처리 (예: 알림 표시 또는 기본 좌표 사용)
-                console.warn('해당 주소의 좌표를 찾을 수 없습니다:', address);
-                return; 
-            }
+			const result = response.v2.addresses[0];
+			if (!result) return;
 
-            // 결과가 있을 때만 item 사용
-            const item = result; 
-            const point = new window.naver.maps.LatLng(item.y, item.x);
+			const item = result; 
+			const point = new window.naver.maps.LatLng(item.y, item.x);
 
-            // ... 지도 생성 및 마커 코드 ...
-            const map = new window.naver.maps.Map(mapElement, {
-                center: point,
-                zoom: 15
-                // ...
-            });
-            
-            new window.naver.maps.Marker({
-                position: point,
-                map: map
-            });
-        });
+			const map = new window.naver.maps.Map(mapElement, {
+				center: point,
+				zoom: 15
+			});
+			
+			new window.naver.maps.Marker({
+				position: point,
+				map: map
+			});
+		});
 	}
 
 	function goBack() {
@@ -164,7 +225,11 @@
 				<h1 class="title">{meeting.title}</h1>
 				<div class="host-info">
 					<div class="host-avatar">
-						<User size={16} />
+						{#if meeting.hostImage}
+							<img src={meeting.hostImage} alt={meeting.hostName} />
+						{:else}
+							<User size={16} />
+						{/if}
 					</div>
 					<span class="host-name">호스트: {meeting.hostName}</span>
 				</div>
@@ -198,10 +263,46 @@
 				<h3>모임 소개</h3>
 				<p>{meeting.description || '상세 설명이 없습니다.'}</p>
 			</div>
+
+			<div class="divider"></div>
+
+			<div class="section reviews">
+				<h3>모임 후기 <span class="review-count">({reviews.length})</span></h3>
+				
+				{#if reviews.length > 0}
+					<div class="review-list">
+						{#each reviews as review}
+							<div class="review-card">
+								<div class="review-header">
+									<span class="reviewer-name">{review.reviewerName}</span>
+									<div class="stars">
+										{#each Array(5) as _, i}
+											<Star 
+												size={12} 
+												fill={i < review.rating ? "#FFD700" : "#eee"} 
+												color={i < review.rating ? "#FFD700" : "#eee"} 
+											/>
+										{/each}
+									</div>
+								</div>
+								<p class="review-content">{review.content}</p>
+							</div>
+						{/each}
+					</div>
+				{:else}
+					<div class="empty-reviews">
+						<p>아직 등록된 후기가 없습니다.</p>
+					</div>
+				{/if}
+			</div>
 		</div>
 
 		<div class="bottom-bar">
-			{#if applicationStatus === 'pending'}
+			{#if isMeetingPast}
+				<button class="action-btn disabled" disabled>
+					종료된 모임입니다
+				</button>
+			{:else if applicationStatus === 'pending'}
 				<button class="action-btn disabled" disabled>
 					<AlertCircle size={18} /> 승인 대기중
 				</button>
@@ -222,7 +323,7 @@
 	.page-container {
 		background-color: #fff;
 		min-height: 100vh;
-		padding-bottom: 80px; /* 하단 바 공간 확보 */
+		padding-bottom: 80px;
 	}
 
 	/* 히어로 이미지 헤더 */
@@ -263,7 +364,7 @@
 		border-top-left-radius: 24px;
 		border-top-right-radius: 24px;
 		background-color: white;
-		margin-top: -24px; /* 이미지 위로 살짝 올리기 */
+		margin-top: -24px;
 		position: relative;
 		z-index: 5;
 		padding-top: 24px;
@@ -305,6 +406,13 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		overflow: hidden; /* 이미지 넘침 방지 */
+	}
+	/* [추가] 호스트 이미지 스타일 */
+	.host-avatar img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
 	}
 
 	.divider {
@@ -371,13 +479,60 @@
 		white-space: pre-wrap;
 	}
 
+	/* 후기 섹션 스타일 */
+	.reviews h3 {
+		font-size: 18px;
+		font-weight: bold;
+		margin: 0 0 16px 0;
+	}
+	.review-count {
+		color: #3182ce;
+		font-weight: normal;
+	}
+	.review-list {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+	.review-card {
+		background-color: #f9fafb;
+		padding: 16px;
+		border-radius: 12px;
+	}
+	.review-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 8px;
+	}
+	.reviewer-name {
+		font-weight: 600;
+		font-size: 14px;
+		color: #2d3748;
+	}
+	.stars { display: flex; gap: 2px; }
+	.review-content {
+		font-size: 14px;
+		color: #4a5568;
+		margin: 0;
+		line-height: 1.5;
+	}
+	.empty-reviews {
+		text-align: center;
+		padding: 20px;
+		color: #a0aec0;
+		font-size: 14px;
+		background-color: #f9fafb;
+		border-radius: 12px;
+	}
+
 	/* 하단 고정 바 */
 	.bottom-bar {
 		position: fixed;
 		bottom: 0;
 		left: 0;
 		right: 0;
-		max-width: 600px; /* 앱 레이아웃 width에 맞춤 */
+		max-width: 600px;
 		margin: 0 auto;
 		background-color: white;
 		padding: 16px 20px;

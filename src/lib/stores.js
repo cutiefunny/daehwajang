@@ -1,10 +1,10 @@
-// src/lib/stores.js
 import { writable } from 'svelte/store';
 import { auth, db } from '$lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 
 export const user = writable(null);
+export const userProfile = writable(null); // [추가] Firestore 유저 프로필 스토어
 
 export const appSettings = writable({
 	logoText: '대화의 장',
@@ -15,14 +15,14 @@ export const appSettings = writable({
 	appBg: '#ffffff'
 });
 
-// [추가] 전역 모달 스토어
+// 모달 스토어
 function createModalStore() {
 	const { subscribe, set, update } = writable({
 		isOpen: false,
-		type: 'alert', // 'alert' | 'confirm' | 'prompt'
+		type: 'alert',
 		message: '',
-		value: '',     // prompt 입력값
-		placeholder: '', // prompt placeholder
+		value: '',
+		placeholder: '',
 		resolve: null
 	});
 
@@ -38,7 +38,6 @@ function createModalStore() {
 				set({ isOpen: true, type: 'confirm', message, resolve });
 			});
 		},
-		// [추가] 입력창 (확인 시 입력값 반환, 취소 시 null 반환)
 		prompt: (message, defaultValue = '', placeholder = '') => {
 			return new Promise((resolve) => {
 				set({ 
@@ -57,7 +56,6 @@ function createModalStore() {
 				return { ...state, isOpen: false, resolve: null };
 			});
 		},
-		// 입력값 업데이트용 (컴포넌트에서 사용)
 		updateValue: (val) => {
 			update(state => ({ ...state, value: val }));
 		}
@@ -66,11 +64,25 @@ function createModalStore() {
 
 export const modal = createModalStore();
 
-// ... 기존 Firebase 인증 및 설정 리스너 코드 유지 ...
+// 인증 상태 및 유저 프로필 동기화
 onAuthStateChanged(auth, (currentUser) => {
 	user.set(currentUser);
+
+	if (currentUser) {
+		// [추가] 로그인 시 Firestore 유저 정보 실시간 구독
+		onSnapshot(doc(db, 'users', currentUser.uid), (docSnap) => {
+			if (docSnap.exists()) {
+				userProfile.set(docSnap.data());
+			} else {
+				userProfile.set(null);
+			}
+		});
+	} else {
+		userProfile.set(null);
+	}
 });
 
+// 앱 설정 동기화
 onSnapshot(doc(db, 'settings', 'global'), (docSnapshot) => {
 	if (docSnapshot.exists()) {
 		appSettings.set({ 

@@ -3,18 +3,16 @@
 	import { user } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { collection, query, where, getDocs, doc, getDoc, orderBy } from 'firebase/firestore';
-	import { Calendar, MapPin, Loader2, Plus, Star, Check } from 'lucide-svelte'; // 아이콘 추가
+	import { Calendar, MapPin, Loader2, Plus, Star, Check, Crown } from 'lucide-svelte';
 	import { goto } from '$app/navigation';
-	import MeetingReviewModal from '$lib/components/MeetingReviewModal.svelte'; // [추가]
+	import MeetingReviewModal from '$lib/components/MeetingReviewModal.svelte';
 
-	// 탭 상태 관리
-	let activeTab = 'participating';
-	let participatingMeetings = [];
-	let appliedMeetings = [];
+	// 탭 관련 상태 제거하고 단일 리스트로 변경
+	let myMeetings = []; 
 	let isLoading = true;
 	let loadedUserId = null;
 
-	// [추가] 리뷰 모달 상태
+	// 리뷰 모달 상태
 	let showReviewModal = false;
 	let reviewTargetMeeting = null;
 
@@ -24,8 +22,7 @@
 			fetchMyMeetings();
 		}
 	} else if (!$user && !isLoading) {
-		participatingMeetings = [];
-		appliedMeetings = [];
+		myMeetings = [];
 		loadedUserId = null;
 		isLoading = false;
 	}
@@ -34,46 +31,55 @@
 		isLoading = true;
 		try {
 			// 1. 내 신청 내역 가져오기
-			const q = query(
+			const appsQ = query(
 				collection(db, 'meeting_applications'),
 				where('userId', '==', $user.uid),
 				orderBy('appliedAt', 'desc')
 			);
-			const snapshot = await getDocs(q);
-			const applications = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-			// [추가] 1.5. 내가 작성한 후기 목록 가져오기 (중복 작성 방지용)
+			// 2. 내가 호스트인 모임 가져오기
+			const hostedQ = query(
+				collection(db, 'meetings'),
+				where('hostId', '==', $user.uid),
+				orderBy('date', 'desc')
+			);
+
+			// 3. 내가 작성한 후기 목록 가져오기
 			const reviewsQ = query(
 				collection(db, 'meeting_reviews'),
 				where('reviewerId', '==', $user.uid)
 			);
-			const reviewsSnap = await getDocs(reviewsQ);
+
+			const [appsSnap, hostedSnap, reviewsSnap] = await Promise.all([
+				getDocs(appsQ),
+				getDocs(hostedQ),
+				getDocs(reviewsQ)
+			]);
+
 			const reviewedMeetingIds = new Set(reviewsSnap.docs.map(d => d.data().meetingId));
 
-			// 2. 각 신청 건에 대해 모임 상세 정보 가져오기
-			const promises = applications.map(async (app) => {
+			// A. 신청 내역 가공 (호스트 닉네임 최신화 포함)
+			const applications = appsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+			const appPromises = applications.map(async (app) => {
 				if (!app.meetingId) return null;
-
 				try {
 					const meetingRef = doc(db, 'meetings', app.meetingId);
 					const meetingSnap = await getDoc(meetingRef);
 					
 					if (meetingSnap.exists()) {
 						const meetingData = meetingSnap.data();
-						const meetingDate = new Date(meetingData.date);
-						const now = new Date();
+						
+						// [수정] 호스트 정보 최신화
+						if (meetingData.hostId) {
+							try {
+								const hostSnap = await getDoc(doc(db, 'users', meetingData.hostId));
+								if (hostSnap.exists()) {
+									meetingData.hostName = hostSnap.data().nickname || meetingData.hostName;
+								}
+							} catch (e) {}
+						}
 
-						return {
-							...app,
-							title: meetingData.title,
-							date: meetingData.date,
-							location: meetingData.location,
-							image: meetingData.image,
-							dday: calculateDday(meetingData.date),
-							// [추가] 상태 플래그 계산
-							isPast: meetingDate < now, // 지난 모임 여부
-							hasReviewed: reviewedMeetingIds.has(app.meetingId) // 후기 작성 여부
-						};
+						return formatMeetingData(meetingSnap.id, meetingData, app.status, reviewedMeetingIds);
 					}
 					return null;
 				} catch (e) {
@@ -82,12 +88,32 @@
 				}
 			});
 
-			const results = await Promise.all(promises);
-			const validResults = results.filter(r => r !== null);
+			// B. 호스트 모임 가공 (호스트는 나 자신 - 프로필 업데이트 안 해도 되지만 일관성 위해 할 수도 있음. 여기선 생략 가능)
+			// 하지만 본인 닉네임 변경 시 반영되도록 $userProfile을 사용하는 게 좋으나, 여기선 DB에서 가져오는 걸로 통일
+			const hostedMeetings = await Promise.all(hostedSnap.docs.map(async (docSnap) => {
+				const data = docSnap.data();
+				// 내 닉네임은 스토어에서 가져오거나 DB에서 가져옴
+				// 여기서는 간단히 기존 데이터 사용 (본인이 본인 걸 볼 땐 덜 중요하거나, 이미 위에서 처리됨)
+				return formatMeetingData(docSnap.id, data, 'accepted', reviewedMeetingIds, true);
+			}));
 
-			// 3. 상태별로 분류
-			participatingMeetings = validResults.filter(r => r.status === 'accepted');
-			appliedMeetings = validResults.filter(r => r.status === 'pending');
+			const appResults = await Promise.all(appPromises);
+			const validAppResults = appResults.filter(r => r !== null);
+
+			// 중복 제거 및 합치기
+			const meetingMap = new Map();
+			hostedMeetings.forEach(m => meetingMap.set(m.id, m));
+			validAppResults.forEach(m => {
+				if (!meetingMap.has(m.id)) meetingMap.set(m.id, m);
+			});
+
+			const allMyMeetings = Array.from(meetingMap.values());
+
+			// 날짜순 정렬 (최신순)
+			allMyMeetings.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+			// 거절된(rejected) 내역은 제외하고 리스트에 저장
+			myMeetings = allMyMeetings.filter(m => m.status !== 'rejected');
 
 		} catch (error) {
 			console.error("내 모임 로딩 실패:", error);
@@ -96,13 +122,30 @@
 		}
 	}
 
-	// [추가] 후기 작성 모달 열기
+	function formatMeetingData(id, data, status, reviewedSet, isHost = false) {
+		const meetingDate = new Date(data.date);
+		const now = new Date();
+		
+		return {
+			id: id,
+			title: data.title,
+			date: data.date,
+			location: data.location,
+			image: data.image,
+			status: status,
+			dday: calculateDday(data.date),
+			isPast: meetingDate < now,
+			hasReviewed: reviewedSet.has(id),
+			isHost: isHost
+		};
+	}
+
+	// ... (나머지 openReviewModal, handleReviewComplete, calculateDday, formatMeetingDate, goToCreate, goToDetail 함수 유지) ...
 	function openReviewModal(meeting) {
 		reviewTargetMeeting = meeting;
 		showReviewModal = true;
 	}
 
-	// [추가] 후기 작성 완료 시 목록 새로고침
 	function handleReviewComplete() {
 		fetchMyMeetings();
 	}
@@ -131,27 +174,14 @@
 	function goToCreate() {
 		goto('/meetings/new');
 	}
+	
+	function goToDetail(id) {
+		goto(`/meetings/${id}`);
+	}
 </script>
 
 <div class="page-container">
 	<h2 class="page-title">내 대화장</h2>
-
-	<div class="tabs">
-		<button
-			class="tab-btn"
-			class:active={activeTab === 'participating'}
-			on:click={() => (activeTab = 'participating')}
-		>
-			참여 중 {participatingMeetings.length}
-		</button>
-		<button
-			class="tab-btn"
-			class:active={activeTab === 'applied'}
-			on:click={() => (activeTab = 'applied')}
-		>
-			신청 내역 {appliedMeetings.length}
-		</button>
-	</div>
 
 	<div class="list-container">
 		{#if isLoading}
@@ -164,77 +194,65 @@
 				<p>로그인이 필요한 서비스입니다.</p>
 				<a href="/login" class="login-link">로그인하기</a>
 			</div>
-		{:else if activeTab === 'participating'}
-			{#if participatingMeetings.length > 0}
-				{#each participatingMeetings as meeting}
-					<div class="meeting-card">
-						<div class="image-wrapper {meeting.isPast ? 'grayscale' : ''}">
-							<img src={meeting.image} alt={meeting.title} />
-							<span class="d-day-badge">{meeting.dday}</span>
-						</div>
-						<div class="content">
-							<div class="status-row">
-								{#if meeting.isPast}
-									<span class="status-badge completed">참여완료</span>
-								{:else}
-									<span class="status-badge confirmed">참여확정</span>
-								{/if}
-							</div>
-							<h3 class="title">{meeting.title}</h3>
-							<div class="info-row">
-								<Calendar size={14} /> <span>{formatMeetingDate(meeting.date)}</span>
-							</div>
-							<div class="info-row">
-								<MapPin size={14} /> <span>{meeting.location}</span>
-							</div>
-							
+		{:else if myMeetings.length > 0}
+			{#each myMeetings as meeting}
+				<div 
+					class="meeting-card" 
+					on:click={() => goToDetail(meeting.id)}
+					role="button"
+					tabindex="0"
+					on:keydown={(e) => e.key === 'Enter' && goToDetail(meeting.id)}
+				>
+					<div class="image-wrapper {meeting.isPast ? 'grayscale' : ''}">
+						<img src={meeting.image} alt={meeting.title} />
+						<span class="d-day-badge">{meeting.dday}</span>
+					</div>
+					<div class="content">
+						<div class="status-row">
+							{#if meeting.isHost}
+								<span class="status-badge host">
+									<Crown size={12} /> 호스트
+								</span>
+							{/if}
+
+							{#if meeting.status === 'pending'}
+								<span class="status-badge pending">신청 중</span>
+							{:else if meeting.isPast}
+								<span class="status-badge completed">참여 완료</span>
+							{:else}
+								<span class="status-badge upcoming">참여 예정</span>
+							{/if}
+
 							{#if meeting.isPast}
-								<div class="review-action">
-									{#if meeting.hasReviewed}
-										<div class="reviewed-badge">
-											<Check size={12} /> 후기 작성 완료
-										</div>
-									{:else}
-										<button class="review-btn" on:click={() => openReviewModal(meeting)}>
-											<Star size={12} /> 후기 작성
-										</button>
-									{/if}
-								</div>
+								{#if meeting.hasReviewed}
+									<span class="reviewed-badge">
+										<Check size={12} /> 작성 완료
+									</span>
+								{:else}
+									<button 
+										class="review-btn" 
+										on:click|stopPropagation={() => openReviewModal(meeting)}
+									>
+										<Star size={12} /> 후기 작성
+									</button>
+								{/if}
 							{/if}
 						</div>
+
+						<h3 class="title">{meeting.title}</h3>
+						<div class="info-row">
+							<Calendar size={14} /> <span>{formatMeetingDate(meeting.date)}</span>
+						</div>
+						<div class="info-row">
+							<MapPin size={14} /> <span>{meeting.location}</span>
+						</div>
 					</div>
-				{/each}
-			{:else}
-				<div class="empty-state">
-					<p>참여 중인 모임이 없습니다.</p>
 				</div>
-			{/if}
+			{/each}
 		{:else}
-			{#if appliedMeetings.length > 0}
-				{#each appliedMeetings as meeting}
-					<div class="meeting-card">
-						<div class="image-wrapper grayscale">
-							<img src={meeting.image} alt={meeting.title} />
-						</div>
-						<div class="content">
-							<div class="status-row">
-								<span class="status-badge waiting">승인대기</span>
-							</div>
-							<h3 class="title">{meeting.title}</h3>
-							<div class="info-row">
-								<Calendar size={14} /> <span>{formatMeetingDate(meeting.date)}</span>
-							</div>
-							<div class="info-row">
-								<MapPin size={14} /> <span>{meeting.location}</span>
-							</div>
-						</div>
-					</div>
-				{/each}
-			{:else}
-				<div class="empty-state">
-					<p>신청한 모임이 없습니다.</p>
-				</div>
-			{/if}
+			<div class="empty-state">
+				<p>참여하거나 신청한 모임이 없습니다.</p>
+			</div>
 		{/if}
 	</div>
 
@@ -265,39 +283,6 @@
 		margin: 0 0 20px 0;
 	}
 
-	.tabs {
-		display: flex;
-		gap: 8px;
-		margin-bottom: 24px;
-		border-bottom: 1px solid #eee;
-	}
-
-	.tab-btn {
-		background: none;
-		border: none;
-		padding: 12px 4px;
-		font-size: 16px;
-		font-weight: 500;
-		color: #999;
-		cursor: pointer;
-		position: relative;
-	}
-
-	.tab-btn.active {
-		color: #333;
-		font-weight: bold;
-	}
-
-	.tab-btn.active::after {
-		content: '';
-		position: absolute;
-		bottom: -1px;
-		left: 0;
-		width: 100%;
-		height: 2px;
-		background-color: #333;
-	}
-
 	.list-container {
 		display: flex;
 		flex-direction: column;
@@ -311,7 +296,18 @@
 		overflow: hidden;
 		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 		border: 1px solid #f0f0f0;
-		height: 130px; /* 높이 약간 증가 (버튼 공간 확보) */
+		height: 130px;
+		cursor: pointer;
+		transition: transform 0.2s, box-shadow 0.2s;
+	}
+
+	.meeting-card:hover {
+		transform: translateY(-2px);
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+	}
+	
+	.meeting-card:active {
+		transform: scale(0.98);
 	}
 
 	.image-wrapper {
@@ -354,28 +350,44 @@
 
 	.status-row {
 		margin-bottom: 6px;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-wrap: wrap;
 	}
 
 	.status-badge {
 		font-size: 11px;
-		padding: 4px 8px;
-		border-radius: 4px;
-		font-weight: bold;
+		padding: 3px 8px;
+		border-radius: 6px;
+		font-weight: 700;
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
 	}
 
-	.status-badge.confirmed {
-		background-color: #e3f2fd;
-		color: #1976d2;
+	.status-badge.host {
+		background-color: #FEFCBF;
+		color: #B7791F;
+		border: 1px solid #F6E05E;
 	}
 
-	.status-badge.waiting {
-		background-color: #f5f5f5;
-		color: #666;
+	.status-badge.upcoming {
+		background-color: #E6FFFA;
+		color: #2C7A7B;
+		border: 1px solid #B2F5EA;
+	}
+
+	.status-badge.pending {
+		background-color: #FFFAF0;
+		color: #C05621;
+		border: 1px solid #FEEBC8;
 	}
 
 	.status-badge.completed {
-		background-color: #edf2f7;
-		color: #4a5568;
+		background-color: #EDF2F7;
+		color: #4A5568;
+		border: 1px solid #E2E8F0;
 	}
 
 	.title {
@@ -396,10 +408,6 @@
 		margin-bottom: 2px;
 	}
 
-	/* 후기 버튼 스타일 */
-	.review-action {
-		margin-top: 8px;
-	}
 	.review-btn {
 		display: inline-flex;
 		align-items: center;
@@ -407,7 +415,7 @@
 		background-color: #3182ce;
 		color: white;
 		border: none;
-		padding: 6px 10px;
+		padding: 3px 8px;
 		border-radius: 6px;
 		font-size: 11px;
 		font-weight: bold;
@@ -424,6 +432,7 @@
 		color: #718096;
 		font-size: 11px;
 		font-weight: bold;
+		padding: 3px 0;
 	}
 
 	.empty-state, .loading-state {

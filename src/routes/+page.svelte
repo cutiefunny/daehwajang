@@ -3,10 +3,10 @@
 	import { goto } from '$app/navigation';
 	import emblaCarouselSvelte from 'embla-carousel-svelte';
 	import { db } from '$lib/firebase';
-	import { collection, getDocs, query, orderBy, where, limit } from 'firebase/firestore';
+	import { collection, getDocs, query, orderBy, where, limit, doc, getDoc } from 'firebase/firestore';
 	import { appSettings, user } from '$lib/stores';
-	import { X, Briefcase } from 'lucide-svelte';
-	import UserProfileModal from '$lib/components/UserProfileModal.svelte'; // [추가] 모달 import
+	import { X, Briefcase, ChevronRight } from 'lucide-svelte';
+	import UserProfileModal from '$lib/components/UserProfileModal.svelte';
 
 	// 모임 슬라이더 옵션
 	let emblaOptions = { loop: false, align: 'start', containScroll: 'trimSnaps' };
@@ -20,13 +20,11 @@
 	let meetings = [];
 	let randomUsers = [];
 	let isLoading = true;
-
 	// 배너 모달 상태
 	let showBannerModal = false;
 	let activeBanner = null;
 	let dontShowChecked = false;
-
-	// [추가] 프로필 모달 상태
+	// 프로필 모달 상태
 	let selectedUser = null;
 
 	function getLocalTodayString() {
@@ -37,27 +35,60 @@
 		return `${year}-${month}-${day}`;
 	}
 
-	$: if ($appSettings.sliderLimit) {
+	// user 상태가 변경되거나 설정이 로드되면 모임 목록 다시 불러오기
+	$: if ($appSettings.sliderLimit || $user) {
 		fetchMeetings();
 	}
 
 	async function fetchMeetings() {
 		try {
 			const now = new Date().toISOString();
+			const fetchLimit = ($appSettings.sliderLimit || 5) + 10;
+			
 			const q = query(
 				collection(db, 'meetings'), 
 				where('date', '>=', now), 
 				orderBy('date', 'asc'),
-				limit($appSettings.sliderLimit)
+				limit(fetchLimit)
 			);
 			const querySnapshot = await getDocs(q);
-			meetings = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+			
+			// [수정] 호스트 닉네임 최신화 로직 추가
+			const allMeetings = await Promise.all(querySnapshot.docs.map(async (docSnap) => {
+				const data = docSnap.data();
+				
+				// 호스트 정보 실시간 조회
+				if (data.hostId) {
+					try {
+						const hostSnap = await getDoc(doc(db, 'users', data.hostId));
+						if (hostSnap.exists()) {
+							const hostData = hostSnap.data();
+							data.hostName = hostData.nickname || data.hostName; // 닉네임 덮어쓰기
+						}
+					} catch (e) {
+						console.error("호스트 정보 로딩 실패", e);
+					}
+				}
+
+				return { id: docSnap.id, ...data };
+			}));
+
+			let filteredMeetings = allMeetings;
+
+			// 내가 호스트인 모임 필터링
+			if ($user) {
+				filteredMeetings = filteredMeetings.filter(m => m.hostId !== $user.uid);
+			}
+
+			// 설정된 개수만큼 자르기
+			meetings = filteredMeetings.slice(0, $appSettings.sliderLimit || 5);
+
 		} catch (error) { console.error(error);
 		} 
 		finally { isLoading = false; }
 	}
 
-	// 활성 이벤트 불러오기
+	// ... (나머지 함수 fetchActiveEvents, fetchRandomUsers, onEventInit, startAutoplay, checkAndShowBanner, closeBanner, getRemainingTime, openProfileModal 유지) ...
 	async function fetchActiveEvents() {
 		try {
 			const today = getLocalTodayString();
@@ -68,12 +99,10 @@
 		} catch (error) { console.error("이벤트 로딩 실패", error); }
 	}
 
-	// 랜덤 회원 불러오기
 	async function fetchRandomUsers() {
 		try {
 			const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'), limit(20));
 			const snapshot = await getDocs(q);
-			
 			let allUsers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 			
 			if ($user) {
@@ -84,12 +113,8 @@
 				const j = Math.floor(Math.random() * (i + 1));
 				[allUsers[i], allUsers[j]] = [allUsers[j], allUsers[i]];
 			}
-
 			randomUsers = allUsers.slice(0, 5);
-
-		} catch (error) {
-			console.error("회원 추천 로딩 실패", error);
-		}
+		} catch (error) { console.error("회원 추천 로딩 실패", error); }
 	}
 
 	function onEventInit(event) {
@@ -114,7 +139,6 @@
 			const snapshot = await getDocs(q);
 			const banners = snapshot.docs.map(doc => doc.data());
 			const validBanner = banners.find(b => b.startDate <= todayDate && b.endDate >= todayDate);
-
 			if (validBanner) {
 				activeBanner = validBanner;
 				showBannerModal = true;
@@ -138,7 +162,6 @@
 		return days === 0 ? `${hours}시간 남음` : `${days}일 ${hours}시간 남음`;
 	}
 
-	// [추가] 모달 열기 함수
 	function openProfileModal(user) {
 		selectedUser = user;
 	}
@@ -180,7 +203,12 @@
 	{/if}
 
 	<section class="section">
-		<h2 class="section-title">새로 개설된 모임 👋</h2>
+		<div class="section-header">
+			<h2 class="section-title">새로 개설된 모임 👋</h2>
+			<a href="/meetings" class="view-all-btn">
+				전체보기 <ChevronRight size={16} />
+			</a>
+		</div>
 		<p class="section-desc">관심 있는 주제의 대화에 참여해보세요.</p>
 
 		{#if isLoading}
@@ -198,6 +226,7 @@
 								<div class="card-content">
 									<span class="badge">{meeting.category}</span>
 									<h3 class="card-title">{meeting.title}</h3>
+									<p class="card-host">by {meeting.hostName}</p> 
 									<p class="card-location">📍 {meeting.location}</p>
 								</div>
 							</a>
@@ -207,8 +236,12 @@
 			</div>
 		{:else}
 			<div class="empty-box">
-				<p>예정된 모임이 없습니다.</p>
-				<span style="font-size: 12px; color: #aaa;">(관리자 페이지에서 데이터를 추가해보세요)</span>
+				<p>참여 가능한 모임이 없습니다.</p>
+				{#if !$user}
+					<span style="font-size: 12px; color: #aaa;">(로그인하고 직접 모임을 만들어보세요!)</span>
+				{:else}
+					<span style="font-size: 12px; color: #aaa;">(직접 모임을 만들어보세요!)</span>
+				{/if}
 			</div>
 		{/if}
 	</section>
@@ -278,8 +311,36 @@
 <style>
 	.page-container { padding: 20px 0; }
 	.section { margin-bottom: 32px; }
-	.section-title { font-size: 20px; font-weight: bold; margin: 0 0 8px 16px; }
+	
+	/* 섹션 헤더 스타일 */
+	.section-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding-right: 16px;
+		margin-bottom: 4px;
+	}
+	.section-title { 
+		font-size: 20px; 
+		font-weight: bold; 
+		margin: 0 0 0 16px; 
+	}
+	.view-all-btn {
+		font-size: 13px;
+		color: #718096;
+		text-decoration: none;
+		display: flex;
+		align-items: center;
+		gap: 2px;
+		font-weight: 500;
+		transition: color 0.2s;
+	}
+	.view-all-btn:hover {
+		color: #2d3748;
+	}
+
 	.section-desc { font-size: 14px; color: #666; margin: 0 0 16px 16px; }
+	
 	.loading-box, .empty-box { text-align: center; padding: 40px; color: #999; font-size: 14px; }
 
 	/* 이벤트 슬라이더 */
@@ -309,7 +370,8 @@
 	.card { 
 		border-radius: 16px; overflow: hidden; background-color: white;
 		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); height: 260px; display: flex; flex-direction: column;
-		text-decoration: none; color: inherit; transition: transform 0.2s;
+		text-decoration: none; color: inherit;
+		transition: transform 0.2s;
 	}
 	.card:active { transform: scale(0.98); }
 
@@ -319,6 +381,8 @@
 	.card-content { padding: 16px; flex: 1; display: flex; flex-direction: column; justify-content: center; }
 	.badge { display: inline-block; font-size: 12px; color: #555; background-color: #f0f0f0; padding: 4px 8px; border-radius: 4px; align-self: flex-start; margin-bottom: 6px; }
 	.card-title { font-size: 18px; font-weight: bold; margin: 0 0 4px 0; }
+	/* [추가] 호스트 이름 스타일 */
+	.card-host { font-size: 12px; color: #718096; margin: 0 0 4px 0; }
 	.card-location { font-size: 12px; color: #888; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 	/* 랜덤 회원 리스트 */
@@ -343,10 +407,8 @@
 		align-items: center;
 		text-align: center;
 		gap: 8px;
-		/* [추가] 버튼 스타일 초기화 */
 		background: none; border: none; padding: 0; cursor: pointer;
 	}
-	/* [추가] 클릭 시 시각적 피드백 */
 	.user-card:active { opacity: 0.7; transform: scale(0.98); transition: transform 0.1s; }
 
 	.user-avatar {
