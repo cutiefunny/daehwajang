@@ -4,8 +4,10 @@
 	import { user, modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-	import { ArrowLeft, Calendar, MapPin, AlignLeft, Type, Grid } from 'lucide-svelte';
+	import { ArrowLeft, Calendar, MapPin, AlignLeft, Type, Grid, Search } from 'lucide-svelte';
 	import ImageUploader from '$lib/components/ImageUploader.svelte';
+
+	const NAVER_CLIENT_ID = import.meta.env.VITE_NAVER_MAPS_CLIENT_ID;
 
 	let isSubmitting = false;
 	
@@ -19,6 +21,12 @@
 		image: ''
 	};
 
+	// 지도 관련 상태
+	let mapElement;
+	let mapObject;
+	let markerObject;
+	let isMapVisible = false;
+
 	// 로그인 체크
 	onMount(async () => {
 		if (!$user) {
@@ -29,6 +37,49 @@
 
 	function goBack() {
 		history.back();
+	}
+
+	// 주소 검색 및 지도 표시 함수
+	function searchLocation() {
+		if (!formData.location.trim()) return modal.alert('주소를 입력해주세요.');
+		if (!window.naver) return modal.alert('지도 서비스를 로드하는 중입니다. 잠시 후 다시 시도해주세요.');
+
+		window.naver.maps.Service.geocode({ query: formData.location }, (status, response) => {
+			if (status !== window.naver.maps.Service.Status.OK) {
+				return modal.alert('주소 검색에 실패했습니다.');
+			}
+
+			const result = response.v2.addresses[0];
+			if (!result) {
+				return modal.alert('검색 결과가 없습니다. 도로명 주소나 지번 주소로 다시 시도해주세요.');
+			}
+
+			// 검색된 정확한 도로명 주소(없으면 지번)로 업데이트
+			const foundAddress = result.roadAddress || result.jibunAddress;
+			formData.location = foundAddress;
+			
+			// 지도 표시
+			const point = new window.naver.maps.LatLng(result.y, result.x);
+			isMapVisible = true;
+
+			if (!mapObject) {
+				mapObject = new window.naver.maps.Map(mapElement, {
+					center: point,
+					zoom: 15
+				});
+			} else {
+				mapObject.setCenter(point);
+			}
+
+			if (markerObject) {
+				markerObject.setPosition(point);
+			} else {
+				markerObject = new window.naver.maps.Marker({
+					position: point,
+					map: mapObject
+				});
+			}
+		});
 	}
 
 	// 모임 개설하기
@@ -77,6 +128,10 @@
 		}
 	}
 </script>
+
+<svelte:head>
+	<script type="text/javascript" src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId={NAVER_CLIENT_ID}&submodules=geocoder"></script>
+</svelte:head>
 
 <div class="page-container">
 	<header class="header">
@@ -139,13 +194,20 @@
 
 			<div class="input-group">
 				<label>
-					<MapPin size={16} /> 장소
+					<MapPin size={16} /> 장소 검색
 				</label>
-				<input 
-					type="text" 
-					placeholder="예: 강남역 11번 출구, 스타벅스 사당점" 
-					bind:value={formData.location} 
-				/>
+				<div class="search-wrapper">
+					<input 
+						type="text" 
+						placeholder="주소 또는 장소명 (예: 강남대로 396)" 
+						bind:value={formData.location} 
+						on:keydown={(e) => e.key === 'Enter' && !e.isComposing && searchLocation()}
+					/>
+					<button type="button" class="search-btn" on:click={searchLocation}>
+						<Search size={18} />
+					</button>
+				</div>
+				<div bind:this={mapElement} class="map-preview" class:visible={isMapVisible}></div>
 			</div>
 		</div>
 
@@ -276,6 +338,37 @@
 	textarea {
 		resize: none;
 		line-height: 1.5;
+	}
+
+	/* 주소 검색 스타일 */
+	.search-wrapper {
+		display: flex;
+		gap: 8px;
+	}
+	.search-btn {
+		background-color: #3182ce;
+		color: white;
+		border: none;
+		border-radius: 8px;
+		width: 48px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+	.map-preview {
+		width: 100%;
+		height: 0;
+		background-color: #f0f0f0;
+		border-radius: 8px;
+		overflow: hidden;
+		transition: height 0.3s;
+		margin-top: 4px;
+	}
+	.map-preview.visible {
+		height: 200px;
+		border: 1px solid #e2e8f0;
 	}
 
 	.bottom-bar {
