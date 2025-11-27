@@ -9,31 +9,27 @@
 	const VAPID_KEY = "BCfJ0FpjsVAG424zRF0tfAWcmlCCCaZzkrUh6b4dUxOtWGspPGZ3xSQ1SJaL_2551mZtV3AtuDx5Pun7dLMr4v4";
 
 	onMount(async () => {
-		// 1. 메시징 지원 여부 및 로그인 체크
 		if (!messaging || !$user) return;
 
 		try {
-			// 2. 알림 권한 요청
 			const permission = await Notification.requestPermission();
 			
 			if (permission === 'granted') {
-				// 3. FCM 토큰 발급
 				const token = await getToken(messaging, { vapidKey: VAPID_KEY });
 				
 				if (token) {
 					console.log('FCM Token:', token);
-					// 4. Firestore에 토큰 저장
 					await saveTokenToUser($user.uid, token);
 				}
 			} else {
 				console.log('알림 권한이 거부되었습니다.');
 			}
 
-			// 5. 포그라운드 메시지 수신 대기
-			// (앱이 켜져 있을 때도 FCM 메시지는 오지만, UI 처리는 +layout.svelte의 Firestore 리스너가 담당하므로
-			//  여기서는 별도의 toast나 store update를 하지 않아 중복을 방지합니다.)
+			// [중요] 포그라운드 메시지 수신 시 아무것도 하지 않음 (로그만 출력)
+			// 이미 +layout.svelte의 Firestore 리스너가 토스트 알림을 보여주고,
+			// Cloud Function이 백그라운드 알림을 담당하므로 여기서 Notification을 생성하면 중복됩니다.
 			onMessage(messaging, (payload) => {
-				console.log('FCM 메시지 수신(Foreground):', payload);
+				console.log('FCM 메시지 수신(Foreground - Silent):', payload);
 			});
 
 		} catch (error) {
@@ -44,6 +40,8 @@
 	async function saveTokenToUser(uid, token) {
 		try {
 			const userRef = doc(db, 'users', uid);
+			// arrayUnion은 이미 DB에 있는 값은 중복 추가하지 않지만,
+			// 토큰이 변경되면 계속 쌓일 수 있으므로 Cloud Function에서 중복 제거 로직이 필수입니다.
 			await updateDoc(userRef, {
 				fcmTokens: arrayUnion(token)
 			});

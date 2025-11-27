@@ -6,7 +6,7 @@ const { setGlobalOptions } = require("firebase-functions/v2");
 admin.initializeApp();
 
 // (선택사항) 서울 리전(asia-northeast3)을 사용하려면 아래 주석을 해제하세요.
-// setGlobalOptions({ region: "asia-northeast3" });
+setGlobalOptions({ region: "asia-northeast3" });
 
 exports.sendPushNotification = onDocumentCreated("notifications/{notificationId}", async (event) => {
     // v2에서는 event.data가 snapshot 역할을 합니다.
