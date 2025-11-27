@@ -2,7 +2,6 @@
 	import { createEventDispatcher, onMount } from 'svelte';
 	import { modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
-	// [수정] addDoc, serverTimestamp 추가
 	import { collection, query, where, getDocs, doc, updateDoc, orderBy, getDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 	import { X, Check, Ban, Loader2, User } from 'lucide-svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
@@ -23,7 +22,6 @@
 				orderBy('appliedAt', 'desc')
 			);
 			const snapshot = await getDocs(q);
-			
 			const applications = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
 			const combinedPromises = applications.map(async (app) => {
@@ -47,6 +45,7 @@
 				}
 				return app;
 			});
+
 			applicants = await Promise.all(combinedPromises);
 
 		} catch (error) {
@@ -56,7 +55,7 @@
 		}
 	}
 
-	// [수정] 상태 변경 및 알림 전송 로직 추가
+	// 상태 변경 및 알림 전송 로직
 	async function updateStatus(applicant, newStatus) {
 		const originalStatus = applicant.status;
 		
@@ -85,7 +84,7 @@
 		}
 	}
 
-	// [추가] 알림 전송 함수
+	// 알림 전송 함수
 	async function sendStatusNotification(applicant, status) {
 		try {
 			// 신청자의 알림 설정 확인
@@ -95,7 +94,6 @@
 			if (userSnap.exists()) {
 				const userData = userSnap.data();
 				const settings = userData.notificationSettings || {};
-				
 				// 전체 알림 ON && 게스트 상태 알림 ON 인지 확인
 				const isEnabled = (settings.enabled !== false) && (settings.guestStatus !== false);
 
@@ -167,7 +165,9 @@
 								<div class="text-info">
 									<span class="name">{applicant.userName}</span>
 									<span class="email">{applicant.userEmail}</span>
-									<span class="date">신청: {formatDate(applicant.appliedAt)}</span>
+									<div class="meta-row">
+										<span class="date">신청: {formatDate(applicant.appliedAt)}</span>
+									</div>
 								</div>
 							</div>
 
@@ -179,6 +179,8 @@
 									<button class="btn reject" on:click={() => updateStatus(applicant, 'rejected')} title="거절">
 										<Ban size={16} />
 									</button>
+								{:else if applicant.status === 'canceled'}
+									<span class="status-badge canceled">취소됨</span>
 								{:else}
 									<span class="status-badge {applicant.status}">
 										{applicant.status === 'accepted' ? '승인됨' : '거절됨'}
@@ -206,50 +208,46 @@
 	
 	.modal-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0;
 		display: flex; justify-content: space-between; align-items: flex-start; background-color: #fff; }
-	.modal-header h3 { margin: 0; font-size: 18px; color: #2d3748;
-	}
+	.modal-header h3 { margin: 0; font-size: 18px; color: #2d3748; }
 	.sub-title { font-size: 13px; color: #718096; margin-top: 4px; display: block; }
 	.close-btn { background: none; border: none; cursor: pointer; color: #a0aec0;
 		padding: 4px; }
 	.close-btn:hover { color: #4a5568; }
 
-	.modal-body { padding: 0; overflow-y: auto; flex: 1; background-color: #fff;
-	}
+	.modal-body { padding: 0; overflow-y: auto; flex: 1; background-color: #fff; }
 	
-	.empty-state { padding: 60px 20px; text-align: center; color: #a0aec0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
-	}
+	.empty-state { padding: 60px 20px; text-align: center; color: #a0aec0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
 	
-	.applicant-list { display: flex;
-		flex-direction: column; }
-	.applicant-item { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-bottom: 1px solid #f7fafc; transition: background-color 0.2s;
-	}
+	.applicant-list { display: flex; flex-direction: column; }
+	.applicant-item { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px;
+		border-bottom: 1px solid #f7fafc; transition: background-color 0.2s; }
 	.applicant-item:hover { background-color: #fafafa; }
 	.applicant-item:last-child { border-bottom: none; }
 
 	.user-info { display: flex; align-items: center; gap: 12px; }
-	.avatar { width: 40px;
-		height: 40px; border-radius: 50%; background-color: #edf2f7; overflow: hidden; display: flex; align-items: center; justify-content: center; color: #718096; font-weight: bold; font-size: 14px;
+	.avatar { width: 40px; height: 40px; border-radius: 50%; background-color: #edf2f7; overflow: hidden; display: flex; align-items: center;
+		justify-content: center; color: #718096; font-weight: bold; font-size: 14px;
 		flex-shrink: 0; border: 1px solid #eee; }
 	.avatar img { width: 100%; height: 100%; object-fit: cover; }
 	
-	.text-info { display: flex;
-		flex-direction: column; }
+	.text-info { display: flex; flex-direction: column; }
 	.name { font-size: 14px; font-weight: 600; color: #2d3748; }
 	.email { font-size: 12px; color: #718096; }
-	.date { font-size: 11px;
-		color: #a0aec0; margin-top: 2px; }
+	.meta-row { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+	.date { font-size: 11px; color: #a0aec0; }
 
 	.actions { display: flex; gap: 8px; align-items: center; }
 	.btn { width: 32px; height: 32px; border-radius: 6px;
-		border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
-	.btn.approve { background-color: #e6fffa; color: #2c7a7b;
-	}
+		border: none; display: flex; align-items: center; justify-content: center; cursor: pointer;
+		transition: all 0.2s; }
+	.btn.approve { background-color: #e6fffa; color: #2c7a7b; }
 	.btn.approve:hover { background-color: #b2f5ea; }
 	.btn.reject { background-color: #fff5f5; color: #c53030; }
 	.btn.reject:hover { background-color: #fed7d7; }
 
-	.status-badge { padding: 4px 8px;
-		border-radius: 4px; font-size: 12px; font-weight: bold; }
+	.status-badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
 	.status-badge.accepted { background-color: #c6f6d5; color: #22543d; }
 	.status-badge.rejected { background-color: #fed7d7; color: #822727; }
+	/* [추가] 취소된 상태 스타일 */
+	.status-badge.canceled { background-color: #edf2f7; color: #718096; }
 </style>

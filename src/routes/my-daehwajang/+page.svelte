@@ -1,21 +1,25 @@
 <script>
 	import { onMount } from 'svelte';
+    // [수정] page 스토어 추가 (URL 파라미터 확인용)
+	import { page } from '$app/stores';
 	import { user } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { collection, query, where, getDocs, doc, getDoc, orderBy } from 'firebase/firestore';
-	import { Calendar, MapPin, Loader2, Plus, Star, Check, Crown } from 'lucide-svelte';
+	import { Calendar, MapPin, Loader2, Plus, Star, Check, Crown, Users } from 'lucide-svelte';
 	import { goto } from '$app/navigation';
 	import MeetingReviewModal from '$lib/components/MeetingReviewModal.svelte';
+	import MeetingApplicantsModal from '$lib/components/admin/MeetingApplicantsModal.svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
 
-	// 탭 관련 상태 제거하고 단일 리스트로 변경
-	let myMeetings = []; 
+	let myMeetings = [];
 	let isLoading = true;
 	let loadedUserId = null;
 
-	// 리뷰 모달 상태
 	let showReviewModal = false;
 	let reviewTargetMeeting = null;
+
+	let showApplicantsModal = false;
+	let applicantsTargetMeeting = null;
 
 	$: if ($user) {
 		if ($user.uid !== loadedUserId) {
@@ -31,21 +35,19 @@
 	async function fetchMyMeetings() {
 		isLoading = true;
 		try {
-			// 1. 내 신청 내역 가져오기
+			// 1. 내 신청 내역
 			const appsQ = query(
 				collection(db, 'meeting_applications'),
 				where('userId', '==', $user.uid),
 				orderBy('appliedAt', 'desc')
 			);
-
-			// 2. 내가 호스트인 모임 가져오기
+			// 2. 내가 호스트인 모임
 			const hostedQ = query(
 				collection(db, 'meetings'),
 				where('hostId', '==', $user.uid),
 				orderBy('date', 'desc')
 			);
-
-			// 3. 내가 작성한 후기 목록 가져오기
+			// 3. 내가 작성한 후기
 			const reviewsQ = query(
 				collection(db, 'meeting_reviews'),
 				where('reviewerId', '==', $user.uid)
@@ -56,10 +58,9 @@
 				getDocs(hostedQ),
 				getDocs(reviewsQ)
 			]);
-
 			const reviewedMeetingIds = new Set(reviewsSnap.docs.map(d => d.data().meetingId));
 
-			// A. 신청 내역 가공 (호스트 닉네임 최신화 포함)
+			// A. 신청 내역 가공
 			const applications = appsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 			const appPromises = applications.map(async (app) => {
 				if (!app.meetingId) return null;
@@ -69,8 +70,6 @@
 					
 					if (meetingSnap.exists()) {
 						const meetingData = meetingSnap.data();
-						
-						// [수정] 호스트 정보 최신화
 						if (meetingData.hostId) {
 							try {
 								const hostSnap = await getDoc(doc(db, 'users', meetingData.hostId));
@@ -79,7 +78,6 @@
 								}
 							} catch (e) {}
 						}
-
 						return formatMeetingData(meetingSnap.id, meetingData, app.status, reviewedMeetingIds);
 					}
 					return null;
@@ -89,32 +87,42 @@
 				}
 			});
 
-			// B. 호스트 모임 가공 (호스트는 나 자신 - 프로필 업데이트 안 해도 되지만 일관성 위해 할 수도 있음. 여기선 생략 가능)
-			// 하지만 본인 닉네임 변경 시 반영되도록 $userProfile을 사용하는 게 좋으나, 여기선 DB에서 가져오는 걸로 통일
+			// B. 호스트 모임 가공
 			const hostedMeetings = await Promise.all(hostedSnap.docs.map(async (docSnap) => {
 				const data = docSnap.data();
-				// 내 닉네임은 스토어에서 가져오거나 DB에서 가져옴
-				// 여기서는 간단히 기존 데이터 사용 (본인이 본인 걸 볼 땐 덜 중요하거나, 이미 위에서 처리됨)
 				return formatMeetingData(docSnap.id, data, 'accepted', reviewedMeetingIds, true);
 			}));
 
 			const appResults = await Promise.all(appPromises);
 			const validAppResults = appResults.filter(r => r !== null);
-
+            
 			// 중복 제거 및 합치기
 			const meetingMap = new Map();
 			hostedMeetings.forEach(m => meetingMap.set(m.id, m));
 			validAppResults.forEach(m => {
 				if (!meetingMap.has(m.id)) meetingMap.set(m.id, m);
 			});
-
 			const allMyMeetings = Array.from(meetingMap.values());
 
-			// 날짜순 정렬 (최신순)
+			// 정렬 및 필터링
 			allMyMeetings.sort((a, b) => new Date(b.date) - new Date(a.date));
-
-			// 거절된(rejected) 내역은 제외하고 리스트에 저장
 			myMeetings = allMyMeetings.filter(m => m.status !== 'rejected');
+
+            // [추가] 딥링크 처리 로직: URL에 meetingId와 view=applicants가 있으면 모달 열기
+            const params = $page.url.searchParams;
+            const targetId = params.get('meetingId');
+            const viewMode = params.get('view');
+
+            if (targetId && viewMode === 'applicants') {
+                const targetMeeting = myMeetings.find(m => m.id === targetId);
+                // 해당 모임이 존재하고, 내가 호스트인 경우에만 오픈
+                if (targetMeeting && targetMeeting.isHost) {
+                    openApplicantsModal(targetMeeting);
+                    
+                    // (선택사항) URL을 깔끔하게 정리하고 싶다면 아래 주석 해제
+                    // goto('/my-daehwajang', { replaceState: true, noScroll: true });
+                }
+            }
 
 		} catch (error) {
 			console.error("내 모임 로딩 실패:", error);
@@ -141,7 +149,6 @@
 		};
 	}
 
-	// ... (나머지 openReviewModal, handleReviewComplete, calculateDday, formatMeetingDate, goToCreate, goToDetail 함수 유지) ...
 	function openReviewModal(meeting) {
 		reviewTargetMeeting = meeting;
 		showReviewModal = true;
@@ -150,6 +157,11 @@
 	function handleReviewComplete() {
 		fetchMyMeetings();
 	}
+	
+	function openApplicantsModal(meeting) {
+		applicantsTargetMeeting = meeting;
+		showApplicantsModal = true;
+	}
 
 	function calculateDday(dateStr) {
 		if (!dateStr) return '-';
@@ -157,7 +169,6 @@
 		const now = new Date();
 		const diffTime = target.getTime() - now.getTime();
 		const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-		
 		if (diffDays < 0) return '종료';
 		if (diffDays === 0) return 'D-Day';
 		return `D-${diffDays}`;
@@ -211,17 +222,26 @@
 								<span class="status-badge host">
 									<Crown size={12} /> 호스트
 								</span>
+								
+								<button 
+									class="manage-btn"
+									on:click|stopPropagation={() => openApplicantsModal(meeting)}
+								>
+									<Users size={12} /> 참가자 관리
+								</button>
 							{/if}
 
-							{#if meeting.status === 'pending'}
-								<span class="status-badge pending">신청 중</span>
-							{:else if meeting.isPast}
-								<span class="status-badge completed">참여 완료</span>
-							{:else}
-								<span class="status-badge upcoming">참여 예정</span>
+							{#if !meeting.isHost}
+								{#if meeting.status === 'pending'}
+									<span class="status-badge pending">신청 중</span>
+								{:else if meeting.isPast}
+									<span class="status-badge completed">참여 완료</span>
+								{:else}
+									<span class="status-badge upcoming">참여 예정</span>
+								{/if}
 							{/if}
 
-							{#if meeting.isPast}
+							{#if meeting.isPast && !meeting.isHost}
 								{#if meeting.hasReviewed}
 									<span class="reviewed-badge">
 										<Check size={12} /> 작성 완료
@@ -264,6 +284,13 @@
 		meeting={reviewTargetMeeting} 
 		on:close={() => showReviewModal = false}
 		on:complete={handleReviewComplete}
+	/>
+{/if}
+
+{#if showApplicantsModal && applicantsTargetMeeting}
+	<MeetingApplicantsModal
+		meeting={applicantsTargetMeeting}
+		on:close={() => showApplicantsModal = false}
 	/>
 {/if}
 
@@ -423,6 +450,25 @@
 	.review-btn:hover {
 		background-color: #2b6cb0;
 	}
+
+	.manage-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		background-color: #805AD5;
+		color: white;
+		border: none;
+		padding: 3px 8px;
+		border-radius: 6px;
+		font-size: 11px;
+		font-weight: bold;
+		cursor: pointer;
+		transition: background 0.2s;
+	}
+	.manage-btn:hover {
+		background-color: #6B46C1;
+	}
+
 	.reviewed-badge {
 		display: inline-flex;
 		align-items: center;
@@ -444,8 +490,6 @@
 		justify-content: center;
 		gap: 10px;
 	}
-
-
 
 	.login-link {
 		color: #1976d2;
