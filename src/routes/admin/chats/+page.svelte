@@ -6,7 +6,8 @@
 			collection, getDocs, query, orderBy, doc, deleteDoc, getCountFromServer, where, documentId, getDoc 
 		} from 'firebase/firestore';
 	import { deleteFileByUrl } from '$lib/firebase';
-	import { Search, MessageSquare, Trash2, Eye, Users, X, ChevronLeft, ChevronRight } from 'lucide-svelte';
+	import { Search, MessageSquare, Trash2, Eye, Users, X } from 'lucide-svelte';
+	import Pagination from '$lib/components/Pagination.svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
 
 	let chatRooms = [];
@@ -237,27 +238,12 @@
 		</table>
 
 		{#if totalPages > 1}
-			<div class="pagination">
-				<button 
-					class="page-btn" 
-					disabled={currentPage === 1} 
-					on:click={() => goToPage(currentPage - 1)}
-				>
-					<ChevronLeft size={16} />
-				</button>
-				
-				<span class="page-info">
-					Page <strong>{currentPage}</strong> of {totalPages}
-				</span>
-
-				<button 
-					class="page-btn" 
-					disabled={currentPage === totalPages} 
-					on:click={() => goToPage(currentPage + 1)}
-				>
-					<ChevronRight size={16} />
-				</button>
-			</div>
+			<Pagination {currentPage} totalPages={totalPages}
+				on:first={() => goToPage(1)}
+				on:prev={() => goToPage(currentPage - 1)}
+				on:next={() => goToPage(currentPage + 1)}
+				on:last={() => goToPage(totalPages)}
+			/>
 		{/if}
 	{/if}
 </div>
@@ -310,12 +296,7 @@
 	td { padding: 16px 24px; border-bottom: 1px solid #edf2f7; vertical-align: middle; font-size: 14px; color: #4a5568; }
 	tr:hover { background-color: #fafafa; }
 
-	/* 페이지네이션 */
-	.pagination { display: flex; align-items: center; justify-content: center; padding: 16px; border-top: 1px solid #e2e8f0; gap: 16px; }
-	.page-btn { background: white; border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
-	.page-btn:hover:not(:disabled) { background-color: #f7fafc; }
-	.page-btn:disabled { color: #cbd5e0; cursor: not-allowed; }
-	.page-info { font-size: 13px; color: #4a5568; }
+	/* pagination moved to shared Pagination component */
 
 	.room-info { display: flex; align-items: center; gap: 12px; }
 	.thumb { width: 40px; height: 40px; border-radius: 8px; overflow: hidden; background-color: #edf2f7; flex-shrink: 0; }

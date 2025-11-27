@@ -6,13 +6,15 @@
 	import { Search, Home, MessageSquare, User, BookOpen, LogIn, X } from 'lucide-svelte';
 	import ConfirmModal from '$lib/components/ConfirmModal.svelte';
 	import ToastContainer from '$lib/components/ToastContainer.svelte';
+	// [추가] NotificationManager 임포트
+	import NotificationManager from '$lib/components/NotificationManager.svelte'; 
 	import { fade, slide } from 'svelte/transition';
 
 	let { children } = $props();
 	const isActive = (path) => $page.url.pathname === path;
 	let isAdminPage = $derived($page.url.pathname.startsWith('/admin'));
 
-	// [수정] Svelte 5 Runes 문법($state) 적용
+	// Svelte 5 Runes 문법($state) 적용
 	let isSearchOpen = $state(false);
 	let globalSearchQuery = $state('');
 	let searchInputRef;
@@ -29,11 +31,7 @@
 
 	function handleGlobalSearch() {
 		if (!globalSearchQuery.trim()) return;
-		
-		// 모임 목록 페이지로 쿼리와 함께 이동
 		goto(`/meetings?q=${encodeURIComponent(globalSearchQuery)}`);
-		
-		// 검색창 닫기 및 초기화
 		isSearchOpen = false;
 		globalSearchQuery = '';
 	}
@@ -50,6 +48,9 @@
 
 <ConfirmModal />
 <ToastContainer />
+{#if $user}
+	<NotificationManager />
+{/if}
 
 {#if isAdminPage}
 	{@render children()}
@@ -57,7 +58,7 @@
 	<div class="app-container" style="background-color: {$appSettings.appBg ?? '#ffffff'};">
 		
 		<header class="app-header" style="background-color: {$appSettings.headerFooterBg ?? '#ffffff'};">
-			<div class="header-top">
+            <div class="header-top">
 				<h1 class="logo">{$appSettings.logoText}</h1>
 				<button class="icon-btn" aria-label="검색" on:click={toggleSearch}>
 					{#if isSearchOpen}
@@ -93,7 +94,7 @@
 		</main>
 
 		<nav class="app-footer" style="background-color: {$appSettings.headerFooterBg ?? '#ffffff'};">
-			<a href="/" class="nav-item" class:active={isActive('/')}>
+            <a href="/" class="nav-item" class:active={isActive('/')}>
 				<Home size={24} />
 				<span>홈</span>
 			</a>
@@ -128,6 +129,7 @@
 {/if}
 
 <style>
+    /* 스타일은 기존 그대로 유지 */
 	:global(body) {
 		margin: 0;
 		padding: 0;
@@ -196,11 +198,12 @@
 	}
 
 	.logo { font-size: 20px; font-weight: bold; margin: 0; }
-	.icon-btn { background: none; border: none; cursor: pointer; padding: 4px; color: #333; display: flex; align-items: center; justify-content: center;}
+	.icon-btn { background: none;
+		border: none; cursor: pointer; padding: 4px; color: #333; display: flex; align-items: center; justify-content: center;}
 	
 	.app-content { 
 		flex: 1; 
-		overflow-y: auto; 
+		overflow-y: auto;
 		padding-bottom: 20px; 
 		position: relative;
 	}
@@ -231,7 +234,8 @@
 	}
 
 	.nav-item.active { color: #333; font-weight: bold; }
-	.avatar-placeholder { width: 24px; height: 24px; border-radius: 50%; background-color: #eee; display: flex;
+	.avatar-placeholder { width: 24px; height: 24px; border-radius: 50%; background-color: #eee;
+		display: flex;
 		align-items: center; justify-content: center; overflow: hidden; }
 	.user-avatar { width: 100%; height: 100%; object-fit: cover; }
 </style>

@@ -3,11 +3,12 @@
 	import { modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { 
-				collection, getDocs, query, orderBy, doc, deleteDoc, getDoc,
-				limit, startAfter, getCountFromServer, where 
-			} from 'firebase/firestore';
+		collection, getDocs, query, orderBy, doc, deleteDoc, getDoc,
+		limit, startAfter, startAt, getCountFromServer, where 
+	} from 'firebase/firestore';
 	import { deleteFileByUrl } from '$lib/firebase';
-	import { Search, MapPin, Calendar, Trash2, ChevronLeft, ChevronRight, Users, RotateCcw } from 'lucide-svelte';
+	import { Search, MapPin, Calendar, Trash2, Users, RotateCcw } from 'lucide-svelte';
+	import Pagination from '$lib/components/Pagination.svelte';
 	import MeetingEditModal from '$lib/components/admin/MeetingEditModal.svelte';
 	import MeetingApplicantsModal from '$lib/components/admin/MeetingApplicantsModal.svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
@@ -47,7 +48,7 @@
 			let q = collection(db, 'meetings');
 			const trimmedTerm = searchTerm.trim().replace(/\s/g, '').toLowerCase();
 
-			// [수정] 검색 로직 변경 (Bi-gram)
+			// 검색 로직 (Bi-gram)
 			if (trimmedTerm && trimmedTerm.length >= 2) {
 				q = query(
 					q, 
@@ -58,32 +59,24 @@
 				q = query(q, orderBy('date', 'desc'), limit(itemsPerPage));
 			}
 
+			// 페이지네이션 커서 적용
 			if (direction === 'next' && lastVisible) {
 				q = query(q, startAfter(lastVisible));
-			} else if (direction === 'prev' && pageStartDocs.length > 1) {
-				const prevDoc = pageStartDocs[currentPage - 2];
-				q = query(q, startAfter(prevDoc));
-				
-				// 1페이지로 복귀 시 쿼리 재설정
-				if (currentPage === 2) {
-					let resetQ = collection(db, 'meetings');
-					if (trimmedTerm && trimmedTerm.length >= 2) {
-						resetQ = query(resetQ, where('_searchKeywords', 'array-contains', trimmedTerm), limit(itemsPerPage));
-					} else {
-						resetQ = query(resetQ, orderBy('date', 'desc'), limit(itemsPerPage));
-					}
-					q = resetQ;
+			} else if (direction === 'prev') {
+				// [수정] 1페이지가 아닐 때만 startAt 커서 적용
+				if (currentPage > 1 && pageStartDocs[currentPage - 1]) {
+					q = query(q, startAt(pageStartDocs[currentPage - 1]));
 				}
+				// 1페이지면 아무 커서도 적용하지 않음 (처음부터 조회)
 			}
 
 			const querySnapshot = await getDocs(q);
-			
 			if (!querySnapshot.empty) {
 				lastVisible = querySnapshot.docs[querySnapshot.docs.length - 1];
-				if (direction === 'next') {
-					if (!pageStartDocs[currentPage - 1]) {
-						pageStartDocs[currentPage - 1] = querySnapshot.docs[0];
-					}
+				
+				// [수정] 현재 페이지의 첫 번째 문서를 저장 (startAt을 위해)
+				if (!pageStartDocs[currentPage - 1]) {
+					pageStartDocs[currentPage - 1] = querySnapshot.docs[0];
 				}
 			}
 
@@ -209,11 +202,36 @@
 		fetchMeetings('next');
 	}
 
+	$: totalPages = Math.ceil(totalItems / itemsPerPage);
+
 	function prevPage() {
 		if (currentPage > 1) {
 			currentPage--;
 			fetchMeetings('prev');
 		}
+	}
+
+	// Jump to first page
+	function goToFirst() {
+		currentPage = 1;
+		pageStartDocs = [];
+		lastVisible = null;
+		fetchMeetings();
+	}
+
+	// Jump to last page by iterating next (bounded)
+	async function goToLast() {
+		const target = Math.ceil(totalItems / itemsPerPage) || 1;
+		if (target <= 1) return;
+		currentPage = 1;
+		pageStartDocs = [];
+		lastVisible = null;
+		const maxIter = Math.min(target, 50);
+		for (let p = 2; p <= maxIter; p++) {
+			await fetchMeetings('next');
+			currentPage = p;
+		}
+		if (target > maxIter) console.warn('Stopped at iteration cap when jumping to last page');
 	}
 </script>
 
@@ -303,17 +321,7 @@
 			</tbody>
 		</table>
 
-		<div class="pagination">
-			<button class="page-btn" disabled={currentPage === 1} on:click={prevPage}><ChevronLeft size={16} /></button>
-			<span class="page-info">Page <strong>{currentPage}</strong></span>
-			<button 
-				class="page-btn" 
-				disabled={meetings.length < itemsPerPage} 
-				on:click={nextPage}
-			>
-				<ChevronRight size={16} />
-			</button>
-		</div>
+		<Pagination {currentPage} totalPages={totalPages} on:first={goToFirst} on:prev={prevPage} on:next={nextPage} on:last={goToLast} />
 	{/if}
 </div>
 
@@ -350,11 +358,7 @@
 	.clickable-row { cursor: pointer; transition: background 0.1s; }
 	.clickable-row:hover { background-color: #f0f4f8; }
 
-	.pagination { display: flex; align-items: center; justify-content: center; padding: 16px; border-top: 1px solid #e2e8f0; gap: 16px; }
-	.page-btn { background: white; border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-	.page-btn:hover:not(:disabled) { background-color: #f7fafc; }
-	.page-btn:disabled { color: #cbd5e0; cursor: not-allowed; }
-	.page-info { font-size: 13px; color: #4a5568; }
+	/* pagination styles provided by shared Pagination component */
 
 	.meeting-info { display: flex; align-items: center; gap: 12px; }
 	.thumb { width: 48px; height: 36px; border-radius: 6px; overflow: hidden; background-color: #edf2f7; flex-shrink: 0; }

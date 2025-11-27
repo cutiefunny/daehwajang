@@ -13,8 +13,9 @@
 		getCountFromServer,
 		where 
 	} from 'firebase/firestore';
-	import { Search, CheckCircle, XCircle, AlertCircle, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-svelte';
+	import { Search, CheckCircle, XCircle, AlertCircle, RotateCcw } from 'lucide-svelte';
 	import UserEditModal from '$lib/components/admin/UserEditModal.svelte';
+	import Pagination from '$lib/components/Pagination.svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
 
 	let users = [];
@@ -150,6 +151,30 @@
 				await fetchUsers('prev');
 				currentPage = newPage;
 			}
+
+			// Jump to first page (reset cursor)
+			async function goToFirst() {
+				currentPage = 1;
+				pageStartDocs = [];
+				lastVisible = null;
+				await fetchUsers();
+			}
+
+			// Attempt to jump to last page by iterating next pages (bounded to avoid huge loops)
+			async function goToLast() {
+				const target = Math.ceil(totalItems / itemsPerPage) || 1;
+				if (target <= 1) return;
+				// reset
+				currentPage = 1;
+				pageStartDocs = [];
+				lastVisible = null;
+				const maxIterations = Math.min(target, 50); // safety cap
+				for (let p = 2; p <= maxIterations; p++) {
+					await fetchUsers('next');
+					currentPage = p;
+				}
+				if (target > maxIterations) console.warn('Stopped at iteration cap when jumping to last page');
+			}
 		}
 	}
 
@@ -264,15 +289,12 @@
 			</tbody>
 		</table>
 
-		<div class="pagination">
-			<button class="page-btn" disabled={currentPage === 1} on:click={() => changePage(currentPage - 1)}>
-				<ChevronLeft size={16} />
-			</button>
-			<span class="page-info">Page <strong>{currentPage}</strong></span>
-			<button class="page-btn" disabled={users.length < itemsPerPage} on:click={() => changePage(currentPage + 1)}>
-				<ChevronRight size={16} />
-			</button>
-		</div>
+		<Pagination {currentPage} totalPages={totalPages}
+			on:first={goToFirst}
+			on:prev={() => changePage(currentPage - 1)}
+			on:next={() => changePage(currentPage + 1)}
+			on:last={goToLast}
+		/>
 	{/if}
 </div>
 
@@ -302,11 +324,7 @@
 	.clickable-row { cursor: pointer; transition: background 0.1s; }
 	.clickable-row:hover { background-color: #f0f4f8; }
 
-	.pagination { display: flex; align-items: center; justify-content: center; padding: 16px; border-top: 1px solid #e2e8f0; gap: 16px; }
-	.page-btn { background: white; border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-	.page-btn:hover:not(:disabled) { background-color: #f7fafc; }
-	.page-btn:disabled { color: #cbd5e0; cursor: not-allowed; }
-	.page-info { font-size: 13px; color: #4a5568; }
+	/* pagination styles are provided by the shared Pagination component */
 
 	.avatar { width: 40px; height: 40px; border-radius: 50%; overflow: hidden; background-color: #edf2f7; display: flex; align-items: center; justify-content: center; }
 	.avatar img { width: 100%; height: 100%; object-fit: cover; }
