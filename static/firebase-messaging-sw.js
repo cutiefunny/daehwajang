@@ -21,12 +21,42 @@ const messaging = firebase.messaging();
 messaging.onBackgroundMessage((payload) => {
   console.log('[firebase-messaging-sw.js] 백그라운드 메시지 수신: ', payload);
   
-  const notificationTitle = payload.notification.title;
+  // [수정] payload.notification 대신 payload.data에서 값을 가져옵니다.
+  const notificationTitle = payload.data.title;
   const notificationOptions = {
-    body: payload.notification.body,
-    icon: '/pwa-192x192.png', // 아이콘 경로 확인
-    badge: '/pwa-192x192.png'
+    body: payload.data.body,
+    icon: '/pwa-192x192.png', // 설정하신 아이콘 사용
+    badge: '/pwa-192x192.png', // 안드로이드 상단 바 아이콘
+    data: {
+        url: payload.data.url // 클릭 이벤트에서 사용할 URL 전달
+    }
   };
 
   self.registration.showNotification(notificationTitle, notificationOptions);
+});
+
+// [추가] 알림 클릭 이벤트 핸들러 (PWA 최적화)
+self.addEventListener('notificationclick', function(event) {
+  console.log('[firebase-messaging-sw.js] 알림 클릭됨');
+  
+  event.notification.close(); // 알림 닫기
+
+  const urlToOpen = event.notification.data?.url || '/';
+
+  // 이미 열려있는 창이 있다면 포커스, 없으면 새 창 열기
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(windowClients) {
+      // 이미 열린 탭 확인
+      for (let i = 0; i < windowClients.length; i++) {
+        const client = windowClients[i];
+        if (client.url.includes(urlToOpen) && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      // 열린 탭이 없으면 새로 열기
+      if (clients.openWindow) {
+        return clients.openWindow(urlToOpen);
+      }
+    })
+  );
 });
