@@ -1,6 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
-	import { user, toast, notifications } from '$lib/stores';
+	import { user } from '$lib/stores';
 	import { db, messaging } from '$lib/firebase';
 	import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 	import { getToken, onMessage } from 'firebase/messaging';
@@ -22,25 +22,18 @@
 				
 				if (token) {
 					console.log('FCM Token:', token);
-					// 4. Firestore에 토큰 저장 (멀티 디바이스 지원을 위해 배열에 추가)
+					// 4. Firestore에 토큰 저장
 					await saveTokenToUser($user.uid, token);
 				}
 			} else {
 				console.log('알림 권한이 거부되었습니다.');
 			}
 
-			// 5. 포그라운드 메시지 수신 대기 (앱을 보고 있을 때)
+			// 5. 포그라운드 메시지 수신 대기
+			// (앱이 켜져 있을 때도 FCM 메시지는 오지만, UI 처리는 +layout.svelte의 Firestore 리스너가 담당하므로
+			//  여기서는 별도의 toast나 store update를 하지 않아 중복을 방지합니다.)
 			onMessage(messaging, (payload) => {
-				console.log('포그라운드 메시지 수신:', payload);
-				
-				const title = payload.notification?.title || '알림';
-				const body = payload.notification?.body || '새로운 메시지가 도착했습니다.';
-				
-				// 토스트 표시
-				toast.send(`${title}: ${body}`, 'info', 4000);
-
-				// [추가] 알림 히스토리에 저장
-				notifications.add({ title, body });
+				console.log('FCM 메시지 수신(Foreground):', payload);
 			});
 
 		} catch (error) {
@@ -51,7 +44,6 @@
 	async function saveTokenToUser(uid, token) {
 		try {
 			const userRef = doc(db, 'users', uid);
-			// arrayUnion을 사용하여 중복 없이 토큰 추가
 			await updateDoc(userRef, {
 				fcmTokens: arrayUnion(token)
 			});

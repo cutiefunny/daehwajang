@@ -4,7 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { user, appSettings, notifications, toast } from '$lib/stores';
 	import { db } from '$lib/firebase';
-	import { collection, query, where, orderBy, onSnapshot, limit } from 'firebase/firestore';
+	import { collection, query, where, orderBy, onSnapshot, limit, doc, writeBatch } from 'firebase/firestore';
 	import { onMount, onDestroy } from 'svelte';
 	import { Search, Home, MessageSquare, User, BookOpen, LogIn, X, Bell, Trash2 } from 'lucide-svelte';
 	import ConfirmModal from '$lib/components/ConfirmModal.svelte';
@@ -15,12 +15,14 @@
 	let { children } = $props();
 
 	const isActive = (path) => $page.url.pathname === path;
+	// $derived가 있으므로 이 파일은 Runes 모드입니다.
 	let isAdminPage = $derived($page.url.pathname.startsWith('/admin'));
 
-	// Svelte 4 호환 문법
-	let isSearchOpen = false;
-	let isNotificationOpen = false;
-	let globalSearchQuery = '';
+	// [수정] Runes 모드에서는 반응형 상태를 위해 반드시 $state()를 사용해야 합니다.
+	let isSearchOpen = $state(false);
+	let isNotificationOpen = $state(false);
+	let globalSearchQuery = $state('');
+	
 	let searchInputRef;
 	let notiUnsubscribe = null;
 
@@ -36,24 +38,21 @@
 		);
 
 		notiUnsubscribe = onSnapshot(q, (snapshot) => {
-			// 1. 새로운 알림 감지 (실시간 알림 효과)
 			snapshot.docChanges().forEach((change) => {
 				if (change.type === 'added') {
 					const data = change.doc.data();
 					
-					// 타임스탬프 확인 (최근 10초 내에 생성된 알림만 팝업)
-					// (페이지 새로고침 시 과거 알림이 우르르 뜨는 것을 방지)
+					// 최근 10초 내 생성된 알림인지 확인
 					const notiTime = data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
 					const now = new Date();
 					
-					// [수정] 브라우저 알림 제거, 토스트만 유지
 					if (now - notiTime < 10000) { 
 						toast.send(data.title); 
 					}
 				}
 			});
 
-			// 2. 스토어 데이터 동기화
+			// 스토어 데이터 동기화
 			const loadedNotis = snapshot.docs.map(doc => ({
 				id: doc.id,
 				...doc.data(),
@@ -64,18 +63,23 @@
 		});
 	}
 
-	// 로그인 상태 변경 감지 및 리스너 연결
+	// 로그인 상태 변경 감지 및 리스너 연결 ($effect 사용)
 	$effect(() => {
-		if (!$user) {
-			if (notiUnsubscribe) { notiUnsubscribe(); notiUnsubscribe = null; }
+		if ($user) {
+			subscribeToNotifications($user.uid);
+		} else {
+			if (notiUnsubscribe) {
+				notiUnsubscribe();
+				notiUnsubscribe = null;
+			}
 			notifications.clear();
-			return;
 		}
 
-		subscribeToNotifications($user.uid);
-
 		return () => {
-			if (notiUnsubscribe) { notiUnsubscribe(); notiUnsubscribe = null; }
+			if (notiUnsubscribe) {
+				notiUnsubscribe();
+				notiUnsubscribe = null;
+			}
 		};
 	});
 
@@ -93,10 +97,32 @@
 		}
 	}
 
-	function toggleNotification() {
+	// 알림창 토글 및 읽음 처리 로직
+	async function toggleNotification() {
 		isNotificationOpen = !isNotificationOpen;
+
 		if (isNotificationOpen) {
 			isSearchOpen = false;
+
+			// 1. 읽지 않은 알림 식별
+			const unreadItems = $notifications.filter(n => !n.read);
+
+			if (unreadItems.length > 0) {
+				// 2. 로컬 스토어 즉시 업데이트 (UI 반응성: 빨간 점 제거)
+				notifications.update(items => items.map(n => ({ ...n, read: true })));
+
+				// 3. Firestore DB 일괄 업데이트
+				try {
+					const batch = writeBatch(db);
+					unreadItems.forEach(item => {
+						const ref = doc(db, 'notifications', item.id);
+						batch.update(ref, { read: true });
+					});
+					await batch.commit();
+				} catch (e) {
+					console.error('알림 읽음 처리 실패:', e);
+				}
+			}
 		}
 	}
 
@@ -148,7 +174,7 @@
 	<div class="app-container" style="background-color: {$appSettings.appBg ?? '#ffffff'};">
 		
 		<header class="app-header" style="background-color: {$appSettings.headerFooterBg ?? '#ffffff'};">
-            <div class="header-top">
+			<div class="header-top">
 				<h1 class="logo">{$appSettings.logoText}</h1>
 				
 				<div class="header-actions">
@@ -234,7 +260,7 @@
 		</main>
 
 		<nav class="app-footer" style="background-color: {$appSettings.headerFooterBg ?? '#ffffff'};">
-            <a href="/" class="nav-item" class:active={isActive('/')}>
+			<a href="/" class="nav-item" class:active={isActive('/')}>
 				<Home size={24} />
 				<span>홈</span>
 			</a>
