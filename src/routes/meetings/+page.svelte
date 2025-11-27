@@ -1,11 +1,13 @@
 <script>
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { page } from '$app/stores'; // [추가] URL 파라미터 접근
+	import { page } from '$app/stores';
 	import { db } from '$lib/firebase';
 	import { collection, getDocs, query, where, orderBy, doc, getDoc, getCountFromServer } from 'firebase/firestore';
 	import { user } from '$lib/stores';
-	import { Search, MapPin, Calendar, Plus, Loader2, SlidersHorizontal, Users, Crown } from 'lucide-svelte';
+	import { Search, MapPin, Calendar, Plus, Loader2, Users, Crown } from 'lucide-svelte';
+	// [추가] HighlightText 컴포넌트 임포트
+	import HighlightText from '$lib/components/HighlightText.svelte';
 
 	let meetings = [];
 	let filteredMeetings = [];
@@ -14,11 +16,9 @@
 	// 검색 및 필터 상태
 	let searchTerm = '';
 	let selectedCategory = '전체';
-
 	const categories = ['전체', '소셜', '취미', '운동', '독서', '여행', '기타'];
-
-	// [추가] URL 쿼리 파라미터 감지하여 검색어 자동 설정
-	// $page.url.searchParams.get('q') 값이 바뀌면 searchTerm에 반영됨 -> 아래 필터 로직 자동 실행
+	
+	// URL 쿼리 파라미터 감지하여 검색어 자동 설정
 	$: queryParam = $page.url.searchParams.get('q');
 	$: if (queryParam !== null) {
 		searchTerm = queryParam;
@@ -44,7 +44,6 @@
 			);
 			
 			const querySnapshot = await getDocs(q);
-
 			// 내 신청 내역 미리 가져오기 (로그인 시)
 			let myApplications = {};
 			if ($user) {
@@ -94,7 +93,6 @@
 					myStatus: myApplications[docSnap.id] || null
 				};
 			}));
-
 			meetings = loadedMeetings;
 			sortMeetings(); // 데이터 로드 후 정렬 및 필터링 실행
 			
@@ -129,7 +127,6 @@
 			// 3순위: 날짜순
 			return 0;
 		});
-
 		filterMeetings();
 	}
 
@@ -237,7 +234,9 @@
 							</div>
 						</div>
 
-						<h3 class="title">{meeting.title}</h3>
+						<h3 class="title">
+							<HighlightText text={meeting.title} term={searchTerm} />
+						</h3>
 						
 						<div class="info-row">
 							<div class="info-group">
@@ -252,7 +251,9 @@
 							</div>
 							<div class="info-item location">
 								<MapPin size={14} />
-								<span>{meeting.location}</span>
+								<span>
+									<HighlightText text={meeting.location} term={searchTerm} />
+								</span>
 							</div>
 						</div>
 					</div>
