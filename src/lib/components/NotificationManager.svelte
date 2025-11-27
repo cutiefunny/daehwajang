@@ -1,6 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
-	import { user, toast } from '$lib/stores';
+	import { user, toast, notifications } from '$lib/stores';
 	import { db, messaging } from '$lib/firebase';
 	import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 	import { getToken, onMessage } from 'firebase/messaging';
@@ -32,11 +32,15 @@
 			// 5. 포그라운드 메시지 수신 대기 (앱을 보고 있을 때)
 			onMessage(messaging, (payload) => {
 				console.log('포그라운드 메시지 수신:', payload);
-				// 기존에 만들어둔 toast 스토어를 활용해 알림 표시
+				
 				const title = payload.notification?.title || '알림';
 				const body = payload.notification?.body || '새로운 메시지가 도착했습니다.';
 				
+				// 토스트 표시
 				toast.send(`${title}: ${body}`, 'info', 4000);
+
+				// [추가] 알림 히스토리에 저장
+				notifications.add({ title, body });
 			});
 
 		} catch (error) {

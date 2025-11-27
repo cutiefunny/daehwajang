@@ -15,7 +15,7 @@ export const appSettings = writable({
 	appBg: '#ffffff'
 });
 
-// [추가] 토스트 알림 스토어
+// 토스트 알림 스토어
 function createToastStore() {
 	const { subscribe, update } = writable([]);
 
@@ -36,6 +36,46 @@ function createToastStore() {
 }
 
 export const toast = createToastStore();
+
+// [추가] 알림 히스토리 스토어 (LocalStorage 연동)
+function createNotificationStore() {
+	const isBrowser = typeof window !== 'undefined';
+	const saved = isBrowser ? localStorage.getItem('app_notifications') : null;
+	const initial = saved ? JSON.parse(saved) : [];
+
+	const { subscribe, update, set } = writable(initial);
+
+	return {
+		subscribe,
+		add: (notification) => {
+			update(prev => {
+				const newNotification = {
+					id: Date.now().toString(),
+					title: notification.title,
+					body: notification.body,
+					timestamp: new Date().toISOString(),
+					read: false
+				};
+				const nextState = [newNotification, ...prev].slice(0, 50); // 최대 50개 저장
+				if (isBrowser) localStorage.setItem('app_notifications', JSON.stringify(nextState));
+				return nextState;
+			});
+		},
+		markAllRead: () => {
+			update(prev => {
+				const nextState = prev.map(n => ({ ...n, read: true }));
+				if (isBrowser) localStorage.setItem('app_notifications', JSON.stringify(nextState));
+				return nextState;
+			});
+		},
+		clear: () => {
+			set([]);
+			if (isBrowser) localStorage.removeItem('app_notifications');
+		}
+	};
+}
+
+export const notifications = createNotificationStore();
 
 // 모달 스토어
 function createModalStore() {

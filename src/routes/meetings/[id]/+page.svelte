@@ -27,7 +27,7 @@
 		}
 	});
 
-	// 1. 모임 상세 정보 가져오기 (호스트 닉네임 최신화 포함)
+	// 1. 모임 상세 정보 가져오기
 	async function fetchMeeting() {
 		try {
 			const docRef = doc(db, 'meetings', meetingId);
@@ -35,14 +35,12 @@
 
 			if (docSnap.exists()) {
 				let data = docSnap.data();
-
-				// [수정] 호스트의 최신 닉네임/이미지 가져오기
+				// 호스트의 최신 닉네임/이미지 가져오기
 				if (data.hostId) {
 					try {
 						const hostSnap = await getDoc(doc(db, 'users', data.hostId));
 						if (hostSnap.exists()) {
 							const hostData = hostSnap.data();
-							// 닉네임이 있으면 덮어쓰기
 							data.hostName = hostData.nickname || data.hostName;
 							data.hostImage = hostData.image || data.hostImage;
 						}
@@ -53,11 +51,10 @@
 
 				meeting = { id: docSnap.id, ...data };
 				
-				// 지난 모임인지 확인
 				const meetingDate = new Date(meeting.date);
 				const now = new Date();
 				isMeetingPast = meetingDate < now;
-
+				
 				setTimeout(() => initMap(meeting.location), 100);
 			} else {
 				await modal.alert('존재하지 않는 모임입니다.');
@@ -70,7 +67,7 @@
 		}
 	}
 
-	// [수정] 1.5. 모임 후기 가져오기 (작성자 닉네임 최신화 포함)
+	// 1.5. 모임 후기 가져오기
 	async function fetchReviews() {
 		try {
 			const q = query(
@@ -79,7 +76,6 @@
 			);
 			const snapshot = await getDocs(q);
 			
-			// 각 후기마다 작성자(users) 정보를 조회하여 최신 닉네임 반영
 			const reviewsData = await Promise.all(snapshot.docs.map(async (docSnap) => {
 				const data = docSnap.data();
 				let currentReviewerName = data.reviewerName;
@@ -101,17 +97,15 @@
 				return {
 					id: docSnap.id,
 					...data,
-					reviewerName: currentReviewerName // 최신 닉네임으로 교체
+					reviewerName: currentReviewerName
 				};
 			}));
 			
-			// 최신순 정렬
 			reviews = reviewsData.sort((a, b) => {
 				const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
 				const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
 				return dateB - dateA;
 			});
-				
 		} catch (error) {
 			console.error('후기 로딩 실패:', error);
 		}
@@ -138,11 +132,11 @@
 	async function applyForMeeting() {
 		if (!$user) return await modal.alert('로그인이 필요한 서비스입니다.');
 		if (isApplying) return;
-
 		if (!confirm('이 모임에 참여 신청하시겠습니까?')) return;
 
 		isApplying = true;
 		try {
+			// 1) 신청 데이터 저장
 			await addDoc(collection(db, 'meeting_applications'), {
 				meetingId: meetingId,
 				meetingTitle: meeting.title, 
@@ -154,6 +148,39 @@
 				status: 'pending', 
 				appliedAt: serverTimestamp()
 			});
+
+			// 2) [추가] 호스트에게 알림 전송 (호스트가 본인이 아닐 경우에만)
+			if (meeting.hostId && meeting.hostId !== $user.uid) {
+				try {
+					// 호스트의 설정 확인
+					const hostRef = doc(db, 'users', meeting.hostId);
+					const hostSnap = await getDoc(hostRef);
+					
+					if (hostSnap.exists()) {
+						const hostData = hostSnap.data();
+						const settings = hostData.notificationSettings || {};
+						
+						// 전체 알림이 켜져있고, '참가 신청 알림'이 켜져있는지 확인 (기본값 true)
+						const isEnabled = (settings.enabled !== false) && (settings.hostApplication !== false);
+
+						if (isEnabled) {
+							await addDoc(collection(db, 'notifications'), {
+								targetUserId: meeting.hostId, // 수신자: 호스트
+								type: 'application',
+								title: '새로운 참가 신청 👋',
+								body: `'${meeting.title}' 모임에 ${$user.displayName || '누군가'}님이 참가 신청을 했습니다.`,
+								link: `/admin/meetings`, // 클릭 시 이동할 링크 (관리자 모임 관리 등)
+								read: false,
+								timestamp: serverTimestamp()
+							});
+							console.log('호스트에게 알림을 전송했습니다.');
+						}
+					}
+				} catch (notiError) {
+					console.error('알림 전송 실패:', notiError);
+					// 알림 실패가 신청 실패로 이어지지는 않게 함
+				}
+			}
 
 			applicationStatus = 'pending';
 			await modal.alert('신청이 완료되었습니다! 호스트의 승인을 기다려주세요.');
@@ -168,7 +195,6 @@
 	// 네이버 지도 초기화
 	function initMap(address) {
 		if (!window.naver || !mapElement) return;
-
 		window.naver.maps.Service.geocode({ query: address }, async (status, response) => {
 			if (status !== window.naver.maps.Service.Status.OK) return;
 
@@ -341,7 +367,8 @@
 	}
 	.hero-overlay {
 		position: absolute;
-		top: 0; left: 0; right: 0; bottom: 0;
+		top: 0; left: 0; right: 0;
+		bottom: 0;
 		background: linear-gradient(to bottom, rgba(0,0,0,0.3), transparent 40%);
 	}
 	.back-btn {
@@ -407,9 +434,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		overflow: hidden; /* 이미지 넘침 방지 */
+		overflow: hidden;
 	}
-	/* [추가] 호스트 이미지 스타일 */
 	.host-avatar img {
 		width: 100%;
 		height: 100%;
@@ -511,7 +537,8 @@
 		font-size: 14px;
 		color: #2d3748;
 	}
-	.stars { display: flex; gap: 2px; }
+	.stars { display: flex;
+		gap: 2px; }
 	.review-content {
 		font-size: 14px;
 		color: #4a5568;
@@ -571,6 +598,4 @@
 		color: #2c7a7b;
 		border: 1px solid #b2f5ea;
 	}
-
-
 </style>

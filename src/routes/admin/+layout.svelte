@@ -1,5 +1,10 @@
 <script>
 	import { page } from '$app/stores';
+	import { user, modal } from '$lib/stores';
+	// [추가] Firebase Auth 관련 임포트
+	import { auth } from '$lib/firebase';
+	import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+	
 	import { 
 		LayoutDashboard, 
 		Settings, 
@@ -30,52 +35,83 @@
 		if (path === '/admin') return $page.url.pathname === '/admin';
 		return $page.url.pathname.startsWith(path);
 	};
+
+	// [추가] 관리자 페이지 전용 로그인 핸들러
+	async function handleAdminLogin() {
+		try {
+			const provider = new GoogleAuthProvider();
+			await signInWithPopup(auth, provider);
+			// 로그인 성공 시 반응형 변수($user)가 업데이트되어 자동으로 화면이 전환됩니다.
+		} catch (error) {
+			console.error('관리자 로그인 실패:', error);
+			await modal.alert('로그인에 실패했습니다.');
+		}
+	}
 </script>
 
-<div class="admin-container">
-	<aside class="sidebar">
-		<div class="sidebar-header">
-			<h2>Admin</h2>
-			<span class="badge">MASTER</span>
-		</div>
-		
-		<nav class="nav-menu">
-			{#each menuItems as item}
-				<a 
-					href={item.path} 
-					class="nav-item" 
-					class:active={isActive(item.path)}
-				>
-					<item.icon size={20} />
-					<span>{item.label}</span>
-				</a>
-			{/each}
-		</nav>
-
-		<div class="sidebar-footer">
-			<a href="/" class="nav-item logout">
-				<LogOut size={20} />
-				<span>앱으로 돌아가기</span>
-			</a>
-		</div>
-	</aside>
-
-	<main class="main-content">
-		<header class="top-bar">
-			<h1 class="page-title">
-				{menuItems.find(i => isActive(i.path))?.label || '관리자 페이지'}
-			</h1>
-			<div class="profile">
-				<span>관리자님</span>
-				<div class="avatar">A</div>
+{#if $user}
+	<div class="admin-container">
+		<aside class="sidebar">
+			<div class="sidebar-header">
+				<h2>Admin</h2>
+				<span class="badge">MASTER</span>
 			</div>
-		</header>
-		
-		<div class="content-area">
-			{@render children()}
+			
+			<nav class="nav-menu">
+				{#each menuItems as item}
+					<a 
+						href={item.path} 
+						class="nav-item" 
+						class:active={isActive(item.path)}
+					>
+						<item.icon size={20} />
+						<span>{item.label}</span>
+					</a>
+				{/each}
+			</nav>
+
+			<div class="sidebar-footer">
+				<a href="/" class="nav-item logout">
+					<LogOut size={20} />
+					<span>앱으로 돌아가기</span>
+				</a>
+			</div>
+		</aside>
+
+		<main class="main-content">
+			<header class="top-bar">
+				<h1 class="page-title">
+					{menuItems.find(i => isActive(i.path))?.label || '관리자 페이지'}
+				</h1>
+				<div class="profile">
+					<span>관리자님</span>
+					<div class="avatar">A</div>
+				</div>
+			</header>
+			
+			<div class="content-area">
+				{@render children()}
+			</div>
+		</main>
+	</div>
+{:else}
+	<div class="admin-login-container">
+		<div class="login-card">
+			<div class="icon-wrapper">
+				<LayoutDashboard size={48} color="#3182ce" />
+			</div>
+			<h2>관리자 로그인</h2>
+			<p>관리자 페이지에 접근하려면 로그인이 필요합니다.</p>
+			
+			<button class="login-btn" on:click={handleAdminLogin}>
+				<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" />
+				<span>Google 계정으로 계속하기</span>
+			</button>
+			
+			<a href="/" class="back-link">메인으로 돌아가기</a>
 		</div>
-	</main>
-</div>
+	</div>
+{/if}
 
 <style>
 	/* 어드민 전체 컨테이너: 100% 너비 사용 */
@@ -83,7 +119,7 @@
 		display: flex;
 		height: 100vh;
 		background-color: #f5f7fa;
-		width: 100vw; /* 전체 너비 사용 */
+		width: 100vw;
 	}
 
 	.sidebar {
@@ -165,4 +201,70 @@
 	}
 
 	.content-area { flex: 1; padding: 32px; overflow-y: auto; }
+
+	/* [추가] 관리자 로그인 화면 스타일 */
+	.admin-login-container {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		height: 100vh;
+		background-color: #f5f7fa;
+		width: 100vw;
+	}
+	
+	.login-card {
+		background: white;
+		padding: 40px;
+		border-radius: 16px;
+		box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+		text-align: center;
+		width: 100%;
+		max-width: 360px;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+	}
+
+	.icon-wrapper {
+		margin-bottom: 24px;
+		background-color: #ebf8ff;
+		width: 80px;
+		height: 80px;
+		border-radius: 50%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.login-card h2 { margin: 0 0 12px 0; color: #2d3748; font-size: 24px; font-weight: 800; }
+	.login-card p { margin: 0 0 32px 0; color: #718096; font-size: 14px; }
+
+	.login-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 12px;
+		background-color: white;
+		border: 1px solid #e2e8f0;
+		border-radius: 12px;
+		padding: 12px 20px;
+		font-size: 15px;
+		font-weight: 600;
+		color: #2d3748;
+		cursor: pointer;
+		transition: all 0.2s;
+		width: 100%;
+		margin-bottom: 20px;
+	}
+
+	.login-btn:hover { background-color: #f7fafc; border-color: #cbd5e0; }
+	.login-btn img { width: 20px; height: 20px; }
+
+	.back-link {
+		font-size: 13px;
+		color: #a0aec0;
+		text-decoration: underline;
+		transition: color 0.2s;
+	}
+	.back-link:hover { color: #718096; }
 </style>

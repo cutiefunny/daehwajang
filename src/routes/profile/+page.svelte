@@ -14,10 +14,12 @@
 		Edit2,
 		Crown,
 		LogOut,
-		Briefcase
+		Briefcase,
+		Bell // [추가] 종 아이콘
 	} from 'lucide-svelte';
 	import ImageUploader from '$lib/components/ImageUploader.svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
+
 	// 프로필 데이터 상태
 	let profile = {
 		nickname: '',
@@ -28,9 +30,21 @@
 		intro: '',
 		image: ''
 	};
+
+	// [추가] 알림 설정 상태 (기본값 true)
+	let notificationSettings = {
+		enabled: true,        // 전체 알림
+		hostApplication: true, // (호스트) 참가 신청 알림
+		guestStatus: true,     // (게스트) 참가 승인/거부 알림
+		chat: true,            // 채팅 알림
+		review: true,          // 대화평 등록 알림
+		event: true            // 이벤트 알림
+	};
+
 	let isLoading = true;
 	let isEditing = false;
 	let editForm = {};
+
 	// 기본 태그 목록
 	const defaultInterests = [
 		'운동', '러닝', '등산', '헬스', '요가',
@@ -39,9 +53,11 @@
 		'코딩', '주식', '부동산', '재테크', '영어',
 		'게임', '반려동물', '봉사', '드라이브'
 	];
+
 	$: interestOptions = $appSettings.interestTags && $appSettings.interestTags.length > 0 
 		? $appSettings.interestTags 
 		: defaultInterests;
+
 	// 멤버십 정보
 	let membership = {
 		type: 'Basic',
@@ -55,6 +71,7 @@
 		totalMeetings: 0,
 		peopleMet: 0
 	};
+
 	// 대화평
 	let reviews = [
 		{ id: '1', text: '👂 경청을 잘해요', count: 0, color: '#e3f2fd', textColor: '#1976d2' },
@@ -62,7 +79,8 @@
 		{ id: '3', text: '💡 통찰력이 있어요', count: 0, color: '#e8f5e9', textColor: '#388e3c' },
 		{ id: '4', text: '🍯 목소리가 꿀', count: 0, color: '#f3e5f5', textColor: '#7b1fa2' }
 	];
-	// [추가] 1표 이상 획득한 뱃지만 필터링
+
+	// 1표 이상 획득한 뱃지만 필터링
 	$: activeReviews = reviews.filter(r => r.count > 0);
 
 	$: if ($user) {
@@ -71,7 +89,7 @@
 		// 로그아웃 처리
 	}
 
-	// [추가] 검색 키워드 생성 유틸리티
+	// 검색 키워드 생성 유틸리티
 	function generateSearchKeywords(text) {
 		if (!text) return [];
 		const keywords = [];
@@ -96,6 +114,11 @@
 					job: data.job || '',
 					interests: data.interests || []
 				};
+
+				// [추가] 저장된 알림 설정 불러오기
+				if (data.notificationSettings) {
+					notificationSettings = { ...notificationSettings, ...data.notificationSettings };
+				}
 
 				if (data.membership) {
 					membership = {
@@ -124,7 +147,7 @@
 					email: currentUser.email,
 					membership: 'Basic',
 					createdAt: new Date().toISOString(),
-					// [추가] 초기 생성 시 키워드 저장
+					notificationSettings: notificationSettings, // 초기 설정 저장
 					_searchKeywords: [
 						...generateSearchKeywords(currentUser.displayName || '익명 유저'),
 						...generateSearchKeywords(currentUser.email?.split('@')[0])
@@ -198,7 +221,6 @@
 				job: editForm.job,
 				interests: editForm.interests,
 				image: editForm.image,
-				// [추가] 수정 시 키워드 업데이트
 				_searchKeywords: [
 					...generateSearchKeywords(editForm.nickname),
 					...generateSearchKeywords($user.email?.split('@')[0])
@@ -214,6 +236,27 @@
 		} catch (error) {
 			console.error('저장 실패:', error);
 			await modal.alert('저장에 실패했습니다.');
+		}
+	}
+
+	// [추가] 알림 설정 토글 핸들러
+	async function toggleNotification(key) {
+		if (!$user) return;
+		
+		// UI 상태 업데이트
+		const newValue = !notificationSettings[key];
+		notificationSettings[key] = newValue;
+
+		try {
+			const userRef = doc(db, 'users', $user.uid);
+			await updateDoc(userRef, {
+				[`notificationSettings.${key}`]: newValue
+			});
+		} catch (error) {
+			console.error('알림 설정 저장 실패:', error);
+			// 실패 시 롤백
+			notificationSettings[key] = !newValue; 
+			await modal.alert('설정 저장에 실패했습니다.');
 		}
 	}
 
@@ -416,6 +459,75 @@
 				{/if}
 			</div>
 		</section>
+
+		<section class="section">
+			<h3 class="section-header">알림 설정</h3>
+			<div class="settings-card">
+				<div class="setting-row main">
+					<div class="label-group">
+						<Bell size={20} color="#4a5568" />
+						<span>푸시 알림 받기</span>
+					</div>
+					<button 
+						class="toggle-switch {notificationSettings.enabled ? 'on' : 'off'}" 
+						on:click={() => toggleNotification('enabled')}
+					>
+						<div class="toggle-thumb"></div>
+					</button>
+				</div>
+
+				{#if notificationSettings.enabled}
+					<div class="sub-settings">
+						<div class="setting-row">
+							<span class="sub-label">참가 신청 알림 (호스트일 때)</span>
+							<button 
+								class="toggle-switch sm {notificationSettings.hostApplication ? 'on' : 'off'}" 
+								on:click={() => toggleNotification('hostApplication')}
+							>
+								<div class="toggle-thumb"></div>
+							</button>
+						</div>
+						<div class="setting-row">
+							<span class="sub-label">참가 승인/거부 알림 (게스트일 때)</span>
+							<button 
+								class="toggle-switch sm {notificationSettings.guestStatus ? 'on' : 'off'}" 
+								on:click={() => toggleNotification('guestStatus')}
+							>
+								<div class="toggle-thumb"></div>
+							</button>
+						</div>
+						<div class="setting-row">
+							<span class="sub-label">채팅 알림</span>
+							<button 
+								class="toggle-switch sm {notificationSettings.chat ? 'on' : 'off'}" 
+								on:click={() => toggleNotification('chat')}
+							>
+								<div class="toggle-thumb"></div>
+							</button>
+						</div>
+						<div class="setting-row">
+							<span class="sub-label">대화평 등록 알림</span>
+							<button 
+								class="toggle-switch sm {notificationSettings.review ? 'on' : 'off'}" 
+								on:click={() => toggleNotification('review')}
+							>
+								<div class="toggle-thumb"></div>
+							</button>
+						</div>
+						<div class="setting-row">
+							<span class="sub-label">이벤트 및 마케팅 알림</span>
+							<button 
+								class="toggle-switch sm {notificationSettings.event ? 'on' : 'off'}" 
+								on:click={() => toggleNotification('event')}
+							>
+								<div class="toggle-thumb"></div>
+							</button>
+						</div>
+					</div>
+				{/if}
+			</div>
+		</section>
+
 	{:else}
 		<div class="empty-state">
 			<p>로그인이 필요한 서비스입니다.</p>
@@ -532,4 +644,80 @@
 	
 	.empty-text { font-size: 14px; color: #999;
 		margin: 0; }
+
+	/* [추가] 알림 설정 스타일 */
+	.settings-card {
+		background-color: white;
+		border-radius: 16px;
+		box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+		overflow: hidden;
+	}
+	.setting-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 16px 20px;
+		border-bottom: 1px solid #f5f7fa;
+	}
+	.setting-row:last-child { border-bottom: none; }
+	.setting-row.main {
+		background-color: #fff;
+		font-weight: 600;
+	}
+	.label-group {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		font-size: 15px;
+		color: #2d3748;
+	}
+	.sub-settings {
+		background-color: #fafbfc;
+		border-top: 1px solid #f0f0f0;
+	}
+	.sub-label {
+		font-size: 14px;
+		color: #4a5568;
+		padding-left: 8px;
+	}
+
+	/* 토글 스위치 스타일 */
+	.toggle-switch {
+		width: 44px;
+		height: 24px;
+		border-radius: 12px;
+		background-color: #e2e8f0;
+		border: none;
+		position: relative;
+		cursor: pointer;
+		transition: background-color 0.2s;
+		padding: 2px;
+	}
+	.toggle-switch.on {
+		background-color: #3182ce;
+	}
+	.toggle-thumb {
+		width: 20px;
+		height: 20px;
+		background-color: white;
+		border-radius: 50%;
+		transition: transform 0.2s;
+		box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+	}
+	.toggle-switch.on .toggle-thumb {
+		transform: translateX(20px);
+	}
+	
+	/* 작은 토글 스위치 */
+	.toggle-switch.sm {
+		width: 36px;
+		height: 20px;
+	}
+	.toggle-switch.sm .toggle-thumb {
+		width: 16px;
+		height: 16px;
+	}
+	.toggle-switch.sm.on .toggle-thumb {
+		transform: translateX(16px);
+	}
 </style>
