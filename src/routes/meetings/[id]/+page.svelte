@@ -132,7 +132,7 @@
 	async function applyForMeeting() {
 		if (!$user) return await modal.alert('로그인이 필요한 서비스입니다.');
 		if (isApplying) return;
-		if (!confirm('이 모임에 참여 신청하시겠습니까?')) return;
+		if (!(await modal.confirm('이 모임에 참여 신청하시겠습니까?'))) return;
 
 		isApplying = true;
 		try {

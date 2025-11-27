@@ -2,9 +2,10 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { user, appSettings, notifications, toast } from '$lib/stores';
+	// [수정] modal 추가
+	import { user, appSettings, notifications, toast, modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
-	import { collection, query, where, orderBy, onSnapshot, limit, doc, writeBatch } from 'firebase/firestore';
+	import { collection, query, where, orderBy, onSnapshot, limit, doc, writeBatch, getDocs } from 'firebase/firestore';
 	import { onMount, onDestroy } from 'svelte';
 	import { Search, Home, MessageSquare, User, BookOpen, LogIn, X, Bell, Trash2 } from 'lucide-svelte';
 	import ConfirmModal from '$lib/components/ConfirmModal.svelte';
@@ -15,10 +16,9 @@
 	let { children } = $props();
 
 	const isActive = (path) => $page.url.pathname === path;
-	// $derived가 있으므로 이 파일은 Runes 모드입니다.
 	let isAdminPage = $derived($page.url.pathname.startsWith('/admin'));
 
-	// [수정] Runes 모드에서는 반응형 상태를 위해 반드시 $state()를 사용해야 합니다.
+	// Svelte 5 Runes
 	let isSearchOpen = $state(false);
 	let isNotificationOpen = $state(false);
 	let globalSearchQuery = $state('');
@@ -42,7 +42,6 @@
 				if (change.type === 'added') {
 					const data = change.doc.data();
 					
-					// 최근 10초 내 생성된 알림인지 확인
 					const notiTime = data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
 					const now = new Date();
 					
@@ -52,7 +51,6 @@
 				}
 			});
 
-			// 스토어 데이터 동기화
 			const loadedNotis = snapshot.docs.map(doc => ({
 				id: doc.id,
 				...doc.data(),
@@ -63,7 +61,7 @@
 		});
 	}
 
-	// 로그인 상태 변경 감지 및 리스너 연결 ($effect 사용)
+	// 로그인 상태 변경 감지
 	$effect(() => {
 		if ($user) {
 			subscribeToNotifications($user.uid);
@@ -97,21 +95,17 @@
 		}
 	}
 
-	// 알림창 토글 및 읽음 처리 로직
 	async function toggleNotification() {
 		isNotificationOpen = !isNotificationOpen;
 
 		if (isNotificationOpen) {
 			isSearchOpen = false;
 
-			// 1. 읽지 않은 알림 식별
 			const unreadItems = $notifications.filter(n => !n.read);
 
 			if (unreadItems.length > 0) {
-				// 2. 로컬 스토어 즉시 업데이트 (UI 반응성: 빨간 점 제거)
 				notifications.update(items => items.map(n => ({ ...n, read: true })));
 
-				// 3. Firestore DB 일괄 업데이트
 				try {
 					const batch = writeBatch(db);
 					unreadItems.forEach(item => {
@@ -123,6 +117,40 @@
 					console.error('알림 읽음 처리 실패:', e);
 				}
 			}
+		}
+	}
+
+	// 알림 전체 삭제 함수 (DB 연동)
+	async function clearAllNotifications() {
+		if ($notifications.length === 0) return;
+		
+		// 이제 modal이 import 되었으므로 정상 동작합니다.
+		if (!await modal.confirm('모든 알림 기록을 삭제하시겠습니까?')) return;
+
+		try {
+			const q = query(
+				collection(db, 'notifications'),
+				where('targetUserId', '==', $user.uid)
+			);
+			const snapshot = await getDocs(q);
+
+			if (snapshot.empty) {
+				notifications.clear();
+				return;
+			}
+
+			const batch = writeBatch(db);
+			snapshot.docs.forEach((doc) => {
+				batch.delete(doc.ref);
+			});
+
+			await batch.commit();
+			
+			toast.send('알림이 모두 삭제되었습니다.');
+
+		} catch (error) {
+			console.error('알림 삭제 실패:', error);
+			toast.send('알림 삭제 중 오류가 발생했습니다.', 'error');
 		}
 	}
 
@@ -203,7 +231,7 @@
 				<div class="notification-area" transition:slide={{ duration: 200, axis: 'y' }}>
 					<div class="noti-header">
 						<span class="noti-label">알림 히스토리</span>
-						<button class="clear-btn" on:click={() => notifications.clear()}>
+						<button class="clear-btn" on:click={clearAllNotifications}>
 							<Trash2 size={12} /> 전체 삭제
 						</button>
 					</div>
