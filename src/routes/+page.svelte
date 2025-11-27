@@ -3,17 +3,18 @@
 	import { goto } from '$app/navigation';
 	import emblaCarouselSvelte from 'embla-carousel-svelte';
 	import { db } from '$lib/firebase';
-	// [수정] getCountFromServer 추가
 	import { collection, getDocs, query, orderBy, where, limit, doc, getDoc, getCountFromServer } from 'firebase/firestore';
 	import { appSettings, user } from '$lib/stores';
-	// [수정] Users 아이콘 추가
 	import { X, Briefcase, ChevronRight, Users } from 'lucide-svelte';
 	import UserProfileModal from '$lib/components/UserProfileModal.svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
 
+	// --- [설정 및 상태 변수] ---
+
 	// 모임 슬라이더 옵션
 	let emblaOptions = { loop: false, align: 'start', containScroll: 'trimSnaps' };
-	// 이벤트 슬라이더 관련 변수
+	
+	// 이벤트 슬라이더 관련
 	let eventEmblaApi;
 	let eventEmblaOptions = { loop: true, align: 'center' };
 	let activeEvents = [];
@@ -23,12 +24,16 @@
 	let meetings = [];
 	let randomUsers = [];
 	let isLoading = true;
+
 	// 배너 모달 상태
 	let showBannerModal = false;
 	let activeBanner = null;
 	let dontShowChecked = false;
+
 	// 프로필 모달 상태
 	let selectedUser = null;
+
+	// --- [유틸리티 함수] ---
 
 	function getLocalTodayString() {
 		const now = new Date();
@@ -38,12 +43,51 @@
 		return `${year}-${month}-${day}`;
 	}
 
-	// user 상태가 변경되거나 설정이 로드되면 모임 목록 다시 불러오기
-	$: if ($appSettings.sliderLimit || $user) {
-		fetchMeetings();
+	function getRemainingTime(targetDateStr) {
+		const diff = new Date(targetDateStr) - new Date();
+		if (diff <= 0) return '마감됨';
+		const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+		const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+		return days === 0 ? `${hours}시간 남음` : `${days}일 ${hours}시간 남음`;
 	}
 
+	// --- [데이터 페칭 로직 분리] ---
+
+	// 1. 호스트 정보 가져오기 (캐싱 고려 가능하지만 여기선 로직 분리 집중)
+	async function fetchHostInfo(hostId, currentHostName) {
+		if (!hostId) return currentHostName;
+		try {
+			const hostSnap = await getDoc(doc(db, 'users', hostId));
+			if (hostSnap.exists()) {
+				return hostSnap.data().nickname || currentHostName;
+			}
+		} catch (e) {
+			console.error('호스트 정보 로딩 실패:', e);
+		}
+		return currentHostName;
+	}
+
+	// 2. 참여 인원 카운트 가져오기
+	async function fetchParticipantCount(meetingId) {
+		try {
+			const countQ = query(
+				collection(db, 'meeting_applications'),
+				where('meetingId', '==', meetingId),
+				where('status', '==', 'accepted')
+			);
+			const countSnap = await getCountFromServer(countQ);
+			return countSnap.data().count;
+		} catch (e) {
+			console.error('참여 인원 카운트 실패:', e);
+			return 0;
+		}
+	}
+
+	// 3. 모임 목록 메인 로직
 	async function fetchMeetings() {
+		// 이미 로딩 중이면 중복 실행 방지 (선택 사항이나 안전장치로 추천)
+		// isLoading = true; 
+
 		try {
 			const now = new Date().toISOString();
 			const fetchLimit = ($appSettings.sliderLimit || 5) + 10;
@@ -55,39 +99,23 @@
 				limit(fetchLimit)
 			);
 			const querySnapshot = await getDocs(q);
-			
-			// [수정] 호스트 닉네임 및 참여 인원 카운트 로직 추가
+
+			// 병렬로 호스트 정보와 참여 인원 수를 가져옵니다.
 			const allMeetings = await Promise.all(querySnapshot.docs.map(async (docSnap) => {
 				const data = docSnap.data();
 				
-				// 1. 호스트 정보 최신화
-				if (data.hostId) {
-					try {
-						const hostSnap = await getDoc(doc(db, 'users', data.hostId));
-						if (hostSnap.exists()) {
-							const hostData = hostSnap.data();
-							data.hostName = hostData.nickname || data.hostName;
-						}
-					} catch (e) { console.error(e); }
-				}
-
-				// 2. [추가] 현재 참여 확정 인원 카운트
-				let currentParticipants = 0;
-				try {
-					const countQ = query(
-						collection(db, 'meeting_applications'),
-						where('meetingId', '==', docSnap.id),
-						where('status', '==', 'accepted')
-					);
-					const countSnap = await getCountFromServer(countQ);
-					currentParticipants = countSnap.data().count;
-				} catch (e) { console.error(e); }
+				// [Refactoring] 비동기 로직 함수 분리
+				const [hostName, currentParticipants] = await Promise.all([
+					fetchHostInfo(data.hostId, data.hostName),
+					fetchParticipantCount(docSnap.id)
+				]);
 
 				return { 
 					id: docSnap.id, 
 					...data,
-					currentParticipants, // 현재 인원
-					maxParticipants: data.maxParticipants || 5 // 제한 인원 (기본값 5)
+					hostName,
+					currentParticipants,
+					maxParticipants: data.maxParticipants || 5
 				};
 			}));
 
@@ -101,20 +129,24 @@
 			// 설정된 개수만큼 자르기
 			meetings = filteredMeetings.slice(0, $appSettings.sliderLimit || 5);
 
-		} catch (error) { console.error(error);
-		} 
-		finally { isLoading = false; }
+		} catch (error) { 
+			console.error('모임 목록 로딩 에러:', error);
+		} finally { 
+			isLoading = false;
+		}
 	}
 
-	// ... (fetchActiveEvents, fetchRandomUsers, onEventInit, startAutoplay, checkAndShowBanner, closeBanner, getRemainingTime, openProfileModal 함수는 기존과 동일) ...
 	async function fetchActiveEvents() {
 		try {
 			const today = getLocalTodayString();
+			// [Tip] 종료일이 오늘 이후인 것만 가져오도록 쿼리 최적화 가능 (복합 인덱스 필요할 수 있음)
 			const q = query(collection(db, 'events'), orderBy('createdAt', 'desc'));
 			const snapshot = await getDocs(q);
 			const allEvents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 			activeEvents = allEvents.filter(e => e.startDate <= today && e.endDate >= today);
-		} catch (error) { console.error("이벤트 로딩 실패", error); }
+		} catch (error) { 
+			console.error("이벤트 로딩 실패", error);
+		}
 	}
 
 	async function fetchRandomUsers() {
@@ -127,24 +159,14 @@
 				allUsers = allUsers.filter(u => u.id !== $user.uid);
 			}
 
+			// Fisher-Yates Shuffle
 			for (let i = allUsers.length - 1; i > 0; i--) {
 				const j = Math.floor(Math.random() * (i + 1));
 				[allUsers[i], allUsers[j]] = [allUsers[j], allUsers[i]];
 			}
 			randomUsers = allUsers.slice(0, 5);
-		} catch (error) { console.error("회원 추천 로딩 실패", error); }
-	}
-
-	function onEventInit(event) {
-		eventEmblaApi = event.detail;
-		startAutoplay();
-	}
-
-	function startAutoplay() {
-		if (activeEvents.length > 1) {
-			autoplayInterval = setInterval(() => {
-				if (eventEmblaApi) eventEmblaApi.scrollNext();
-			}, 5000);
+		} catch (error) { 
+			console.error("회원 추천 로딩 실패", error);
 		}
 	}
 
@@ -152,11 +174,13 @@
 		const todayDate = getLocalTodayString();
 		const hideDate = localStorage.getItem('hideBanner_date');
 		if (hideDate === todayDate) return;
+
 		try {
 			const q = query(collection(db, 'banners'), orderBy('createdAt', 'desc'));
 			const snapshot = await getDocs(q);
 			const banners = snapshot.docs.map(doc => doc.data());
 			const validBanner = banners.find(b => b.startDate <= todayDate && b.endDate >= todayDate);
+			
 			if (validBanner) {
 				activeBanner = validBanner;
 				showBannerModal = true;
@@ -172,20 +196,29 @@
 		showBannerModal = false;
 	}
 
-	function getRemainingTime(targetDateStr) {
-		const diff = new Date(targetDateStr) - new Date();
-		if (diff <= 0) return '마감됨';
-		const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-		const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-		return days === 0 ? `${hours}시간 남음` : `${days}일 ${hours}시간 남음`;
-	}
-
 	function openProfileModal(user) {
 		selectedUser = user;
 	}
 
+	function onEventInit(event) {
+		eventEmblaApi = event.detail;
+		startAutoplay();
+	}
+
+	function startAutoplay() {
+		if (activeEvents.length > 1) {
+			autoplayInterval = setInterval(() => {
+				if (eventEmblaApi) eventEmblaApi.scrollNext();
+			}, 5000);
+		}
+	}
+
+	// --- [라이프사이클 및 반응성] ---
+
+	// [수정] onMount에서는 fetchMeetings를 호출하지 않습니다. 
+	// 아래의 반응형 구문($:)이 초기 로드 시에도 실행되기 때문입니다.
 	onMount(async () => {
-		await fetchMeetings();
+		// await fetchMeetings(); // <--- 중복 호출 제거
 		fetchActiveEvents();
 		fetchRandomUsers();
 		checkAndShowBanner();
@@ -194,6 +227,13 @@
 	onDestroy(() => {
 		if (autoplayInterval) clearInterval(autoplayInterval);
 	});
+
+	// user 상태가 변경되거나 설정이 로드되면 모임 목록 다시 불러오기
+	// 이 구문은 컴포넌트 마운트 직후 $user나 $appSettings 값이 확정될 때 자동으로 실행됩니다.
+	$: if ($appSettings.sliderLimit !== undefined || $user !== undefined) {
+		fetchMeetings();
+	}
+
 </script>
 
 <div class="page-container">
@@ -344,7 +384,7 @@
 		margin-bottom: 4px;
 	}
 	.section-title { 
-		font-size: 20px; 
+		font-size: 20px;
 		font-weight: bold; 
 		margin: 0 0 0 16px; 
 	}
@@ -371,7 +411,8 @@
 	.event-slider { overflow: hidden; }
 	.event-slide { flex: 0 0 100%; padding: 0 16px; box-sizing: border-box; }
 	.event-card {
-		display: block; position: relative; width: 100%; height: 200px;
+		display: block; position: relative;
+		width: 100%; height: 200px;
 		border-radius: 16px; overflow: hidden; text-decoration: none;
 		box-shadow: 0 4px 12px rgba(0,0,0,0.1);
 	}
@@ -400,13 +441,15 @@
 
 	.card-image-wrapper { position: relative; width: 100%; height: 140px; }
 	.card-image { width: 100%; height: 100%; object-fit: cover; }
-	.time-badge { position: absolute; top: 10px; right: 10px; background-color: rgba(0, 0, 0, 0.6); color: white; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 12px; backdrop-filter: blur(4px); z-index: 10; }
+	.time-badge { position: absolute; top: 10px; right: 10px; background-color: rgba(0, 0, 0, 0.6); color: white;
+	font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 12px; backdrop-filter: blur(4px); z-index: 10; }
 	.card-content { padding: 16px; flex: 1; display: flex; flex-direction: column; justify-content: center; }
-	.badge { display: inline-block; font-size: 12px; color: #555; background-color: #f0f0f0; padding: 4px 8px; border-radius: 4px; align-self: flex-start; margin-bottom: 6px; }
+	.badge { display: inline-block; font-size: 12px; color: #555; background-color: #f0f0f0; padding: 4px 8px;
+	border-radius: 4px; align-self: flex-start; margin-bottom: 6px; }
 	.card-title { font-size: 18px; font-weight: bold; margin: 0 0 4px 0; }
 	.card-host { font-size: 12px; color: #718096; margin: 0 0 8px 0; }
 	
-	/* [수정] 카드 하단 정보 (위치+인원) */
+	/* 카드 하단 정보 (위치+인원) */
 	.card-footer {
 		display: flex;
 		align-items: center;
@@ -415,7 +458,7 @@
 	}
 	.card-location { 
 		font-size: 12px; color: #888; margin: 0; 
-		white-space: nowrap; overflow: hidden; text-overflow: ellipsis; 
+		white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 		max-width: 65%;
 	}
 	.card-participants {
@@ -475,8 +518,10 @@
 	.text-muted { color: #cbd5e0; }
 
 	/* 배너 모달 */
-	.banner-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.6); z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 20px; }
-	.banner-modal { width: 100%; max-width: 360px; background-color: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; }
+	.banner-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.6);
+	z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+	.banner-modal { width: 100%; max-width: 360px; background-color: white; border-radius: 16px;
+	overflow: hidden; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; }
 	.banner-body { width: 100%; background-color: #fff; }
 	.banner-link { display: block; font-size: 0; }
 	.banner-body img { width: 100%; height: auto; object-fit: contain; display: block; }

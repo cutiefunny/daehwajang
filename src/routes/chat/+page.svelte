@@ -17,7 +17,6 @@
 	let unsubscribe = null;
 
 	// 채팅방 목록 실시간 구독
-	// (실제 앱에서는 'participants' 배열에 내 ID가 있는 방만 가져오는 것이 좋음)
 	function subscribeToChatRooms() {
 		const q = query(
 			collection(db, 'chatRooms'),
@@ -40,7 +39,7 @@
 		if (unsubscribe) unsubscribe();
 	});
 
-	// 새 채팅방 만들기 (간단히 prompt로 제목 입력받기)
+	// 새 채팅방 만들기
 	async function createChatRoom() {
 		if (!$user) return await modal.alert('로그인이 필요합니다!');
 		
@@ -55,8 +54,8 @@
 				image: '/images/cafe.png', // 기본 이미지
 				lastMessage: '대화가 시작되었습니다.',
 				timestamp: serverTimestamp(),
-				participantCount: 1,
-				participants: [$user.uid]
+				participantCount: 1, // 초기값 (참고용)
+				participants: [$user.uid] // 실제 참여자 명단
 			});
 		} catch (error) {
 			console.error('채팅방 생성 실패:', error);
@@ -64,7 +63,7 @@
 		}
 	}
 
-	// 날짜 포맷팅 (예: 방금 전, 10:30, 어제)
+	// 날짜 포맷팅
 	function formatTime(timestamp) {
 		if (!timestamp) return '';
 		const date = timestamp.toDate();
@@ -98,11 +97,11 @@
 						</div>
 						<div class="bottom-row">
 							<p class="message">{room.lastMessage}</p>
-							</div>
+						</div>
 						<div class="meta-row">
 							<div class="meta-item">
 								<Users size={12} />
-								<span>{room.participantCount}명</span>
+								<span>{room.participants ? room.participants.length : 0}명</span>
 							</div>
 							{#if room.hostId === $user?.uid}
 								<div class="meta-item host-badge">

@@ -1,7 +1,8 @@
 <script>
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
-	import { user, modal } from '$lib/stores'; // [수정] modal 추가
+	import { goto } from '$app/navigation';
+	import { user, modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { 
 		collection, 
@@ -13,10 +14,11 @@
 		doc, 
 		updateDoc,
 		getDoc,
-		arrayUnion, // [추가] 배열에 요소 추가
-		increment   // [추가] 숫자 증가
+		arrayUnion, 
+		arrayRemove,
+		increment 
 	} from 'firebase/firestore';
-	import { Send, MoreVertical, Phone, ArrowLeft } from 'lucide-svelte';
+	import { Send, MoreVertical, Phone, ArrowLeft, LogOut } from 'lucide-svelte';
 
 	const roomId = $page.params.id;
 	let roomTitle = '로딩 중...';
@@ -25,8 +27,9 @@
 	let scrollContainer;
 	let inputElement;
 	let unsubscribe = null;
+	let isMenuOpen = false;
 
-	// 1. 채팅방 정보 가져오기 & 입장 처리 (참여자 등록)
+	// 1. 채팅방 정보 가져오기 & 입장 처리
 	async function fetchRoomInfoAndJoin() {
 		try {
 			const docRef = doc(db, 'chatRooms', roomId);
@@ -36,13 +39,22 @@
 				const data = docSnap.data();
 				roomTitle = data.title;
 
-				// [버그 수정] 현재 유저가 참여자 목록에 없으면 추가
+				// [수정] 신규 참여자인 경우: 입장 처리 + 시스템 메시지 전송
 				if ($user && (!data.participants || !data.participants.includes($user.uid))) {
+					// 1. 참여자 목록 업데이트
 					await updateDoc(docRef, {
-						participants: arrayUnion($user.uid), // 배열에 내 ID 추가 (중복 방지됨)
-						participantCount: increment(1)       // 참여자 수 1 증가
+						participants: arrayUnion($user.uid),
+						participantCount: increment(1)
 					});
-					console.log('채팅방 참여자로 등록되었습니다.');
+
+					// 2. 입장 시스템 메시지 전송
+					await addDoc(collection(db, 'chatRooms', roomId, 'messages'), {
+						text: `${$user.displayName || '알 수 없는 사용자'}님이 입장했습니다.`,
+						createdAt: serverTimestamp(),
+						type: 'system' // 시스템 메시지 타입 지정
+					});
+					
+					console.log('채팅방 참여 및 입장 메시지 전송 완료');
 				}
 			} else {
 				roomTitle = '존재하지 않는 방';
@@ -65,29 +77,28 @@
 				id: doc.id,
 				...doc.data()
 			}));
-			// 메시지가 오면 스크롤을 아래로
 			tick().then(() => scrollToBottom());
 		});
 	}
 
-	// 3. 메시지 전송
+	// 3. 메시지 전송 (일반 메시지)
 	async function sendMessage() {
 		if (!newMessage.trim() || !$user) return;
 
 		const text = newMessage;
-		newMessage = ''; // 입력창 즉시 비우기
+		newMessage = '';
 
 		try {
-			// 서브 컬렉션에 메시지 추가
 			await addDoc(collection(db, 'chatRooms', roomId, 'messages'), {
 				text: text,
 				senderId: $user.uid,
 				senderName: $user.displayName || '익명',
 				senderImage: $user.photoURL,
-				createdAt: serverTimestamp()
+				createdAt: serverTimestamp(),
+				type: 'user' // 일반 메시지 명시 (없어도 무방하지만 구분 위해 권장)
 			});
 
-			// 채팅방 목록에 표시될 '마지막 메시지' 업데이트
+			// 마지막 메시지 업데이트
 			const roomRef = doc(db, 'chatRooms', roomId);
 			await updateDoc(roomRef, {
 				lastMessage: text,
@@ -98,9 +109,42 @@
 			inputElement.focus();
 		} catch (error) {
 			console.error('메시지 전송 실패:', error);
-			// [수정] alert -> modal.alert
 			await modal.alert('전송에 실패했습니다.');
 		}
+	}
+
+	// 4. 대화방 나가기
+	async function leaveRoom() {
+		if (!await modal.confirm('정말 대화방을 나가시겠습니까?')) return;
+
+		try {
+			// [수정] 퇴장 시스템 메시지 먼저 전송 (권한 문제 방지 및 순서 보장)
+			await addDoc(collection(db, 'chatRooms', roomId, 'messages'), {
+				text: `${$user.displayName || '알 수 없는 사용자'}님이 방을 나갔습니다.`,
+				createdAt: serverTimestamp(),
+				type: 'system'
+			});
+
+			const roomRef = doc(db, 'chatRooms', roomId);
+			// 참여자 목록에서 제거
+			await updateDoc(roomRef, {
+				participants: arrayRemove($user.uid),
+				participantCount: increment(-1)
+			});
+
+			goto('/chat'); 
+		} catch (error) {
+			console.error('대화방 나가기 실패:', error);
+			await modal.alert('대화방을 나가는 중 오류가 발생했습니다.');
+		}
+	}
+
+	function toggleMenu() {
+		isMenuOpen = !isMenuOpen;
+	}
+
+	function closeMenu() {
+		if (isMenuOpen) isMenuOpen = false;
 	}
 
 	function scrollToBottom() {
@@ -115,13 +159,14 @@
 	}
 
 	onMount(() => {
-		// [수정] 단순 조회가 아니라 입장 처리까지 수행하는 함수 호출
 		fetchRoomInfoAndJoin();
 		subscribeToMessages();
+		document.addEventListener('click', closeMenu);
 	});
 
 	onDestroy(() => {
 		if (unsubscribe) unsubscribe();
+		document.removeEventListener('click', closeMenu);
 	});
 
 	function goBack() {
@@ -137,31 +182,50 @@
 		<span class="room-name">{roomTitle}</span>
 		<div class="actions">
 			<button class="icon-btn"><Phone size={18} /></button>
-			<button class="icon-btn"><MoreVertical size={18} /></button>
+			
+			<div class="menu-container" on:click|stopPropagation>
+				<button class="icon-btn" on:click={toggleMenu}>
+					<MoreVertical size={18} />
+				</button>
+				{#if isMenuOpen}
+					<div class="dropdown-menu">
+						<button class="menu-item delete" on:click={leaveRoom}>
+							<LogOut size={16} />
+							<span>나가기</span>
+						</button>
+					</div>
+				{/if}
+			</div>
 		</div>
 	</div>
 
-	<div class="message-list" bind:this={scrollContainer}>
+	<div class="message-list" bind:this={scrollContainer} on:click={closeMenu}>
 		<div class="date-divider">오늘</div>
 		
 		{#each messages as msg (msg.id)}
-			<div class="message-row {msg.senderId === $user?.uid ? 'my-msg' : 'other-msg'}">
-				{#if msg.senderId !== $user?.uid}
-					<div class="profile-pic">
-						<img src={msg.senderImage || "https://placehold.co/100x100/orange/white?text=U"} alt="User" />
-					</div>
-				{/if}
-				
-				<div class="message-content">
+			{#if msg.type === 'system'}
+				<div class="system-msg-row">
+					<span class="system-msg-badge">{msg.text}</span>
+				</div>
+			{:else}
+				<div class="message-row {msg.senderId === $user?.uid ? 'my-msg' : 'other-msg'}">
 					{#if msg.senderId !== $user?.uid}
-						<span class="sender-name">{msg.senderName}</span>
+						<div class="profile-pic">
+							<img src={msg.senderImage || "https://placehold.co/100x100/orange/white?text=U"} alt="User" />
+						</div>
 					{/if}
-					<div class="bubble-wrapper">
-						<div class="bubble">{msg.text}</div>
-						<span class="time">{formatTime(msg.createdAt)}</span>
+					
+					<div class="message-content">
+						{#if msg.senderId !== $user?.uid}
+							<span class="sender-name">{msg.senderName}</span>
+						{/if}
+						<div class="bubble-wrapper">
+							<div class="bubble">{msg.text}</div>
+							<span class="time">{formatTime(msg.createdAt)}</span>
+						</div>
 					</div>
 				</div>
-			</div>
+			{/if}
 		{/each}
 	</div>
 
@@ -180,7 +244,6 @@
 </div>
 
 <style>
-	/* 기존 스타일 유지 */
 	.chat-room-container {
 		display: flex;
 		flex-direction: column;
@@ -197,6 +260,7 @@
 		padding: 0 8px;
 		border-bottom: 1px solid rgba(0,0,0,0.05);
 		flex-shrink: 0;
+		z-index: 10;
 	}
 
 	.back-btn { margin-right: 8px; }
@@ -210,7 +274,40 @@
 		text-overflow: ellipsis;
 	}
 
-	.actions { display: flex; }
+	.actions { display: flex; align-items: center; }
+
+	.menu-container { position: relative; }
+
+	.dropdown-menu {
+		position: absolute;
+		top: 100%;
+		right: 0;
+		margin-top: 8px;
+		background: white;
+		border-radius: 8px;
+		box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+		min-width: 120px;
+		overflow: hidden;
+		padding: 4px 0;
+		z-index: 20;
+	}
+
+	.menu-item {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		width: 100%;
+		padding: 10px 16px;
+		font-size: 13px;
+		background: none;
+		border: none;
+		cursor: pointer;
+		color: #333;
+		text-align: left;
+	}
+
+	.menu-item:hover { background-color: #f5f5f5; }
+	.menu-item.delete { color: #e53e3e; }
 
 	.icon-btn {
 		background: none;
@@ -243,34 +340,34 @@
 		margin: 8px 0;
 	}
 
+	/* [추가] 시스템 메시지 스타일 */
+	.system-msg-row {
+		display: flex;
+		justify-content: center;
+		margin: 8px 0;
+	}
+	
+	.system-msg-badge {
+		background-color: rgba(0, 0, 0, 0.15); /* 반투명 검정 배경 */
+		color: white;
+		font-size: 11px;
+		padding: 4px 12px;
+		border-radius: 12px;
+	}
+
 	.message-row {
 		display: flex;
 		align-items: flex-start;
 		max-width: 80%;
 	}
 
-	.my-msg {
-		align-self: flex-end;
-		flex-direction: row-reverse;
-	}
-
+	.my-msg { align-self: flex-end; flex-direction: row-reverse; }
 	.my-msg .bubble-wrapper { flex-direction: row-reverse; }
-
-	.my-msg .bubble {
-		background-color: #feec34;
-		color: #000;
-		border-top-right-radius: 0;
-	}
-
+	.my-msg .bubble { background-color: #feec34; color: #000; border-top-right-radius: 0; }
 	.my-msg .time { text-align: right; }
 
 	.other-msg { align-self: flex-start; }
-
-	.other-msg .bubble {
-		background-color: #fff;
-		color: #000;
-		border-top-left-radius: 0;
-	}
+	.other-msg .bubble { background-color: #fff; color: #000; border-top-left-radius: 0; }
 
 	.profile-pic {
 		width: 32px;
@@ -281,29 +378,13 @@
 		background-color: #eee;
 	}
 
-	.profile-pic img {
-		width: 100%;
-		height: 100%;
-		object-fit: cover;
-	}
+	.profile-pic img { width: 100%; height: 100%; object-fit: cover; }
 
-	.message-content {
-		display: flex;
-		flex-direction: column;
-	}
+	.message-content { display: flex; flex-direction: column; }
 
-	.sender-name {
-		font-size: 11px;
-		color: #555;
-		margin-bottom: 2px;
-		margin-left: 2px;
-	}
+	.sender-name { font-size: 11px; color: #555; margin-bottom: 2px; margin-left: 2px; }
 
-	.bubble-wrapper {
-		display: flex;
-		align-items: flex-end;
-		gap: 6px;
-	}
+	.bubble-wrapper { display: flex; align-items: flex-end; gap: 6px; }
 
 	.bubble {
 		padding: 8px 12px;
@@ -314,12 +395,7 @@
 		word-break: break-word;
 	}
 
-	.time {
-		font-size: 10px;
-		color: #555;
-		white-space: nowrap;
-		margin-bottom: 0;
-	}
+	.time { font-size: 10px; color: #555; white-space: nowrap; margin-bottom: 0; }
 
 	.input-area {
 		background-color: white;
@@ -355,8 +431,5 @@
 		flex-shrink: 0;
 	}
 
-	.send-btn:disabled {
-		background-color: #f0f0f0;
-		color: #ccc;
-	}
+	.send-btn:disabled { background-color: #f0f0f0; color: #ccc; }
 </style>
