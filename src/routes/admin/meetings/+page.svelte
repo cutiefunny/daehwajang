@@ -2,11 +2,12 @@
 	import { onMount } from 'svelte';
 	import { modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
-	import { collection, getDocs, query, orderBy, doc, deleteDoc } from 'firebase/firestore';
-	// [추가] Users 아이콘 import
-	import { Search, MapPin, Calendar, Trash2, ChevronLeft, ChevronRight, Users } from 'lucide-svelte';
+	import { 
+		collection, getDocs, query, orderBy, doc, deleteDoc, 
+		limit, startAfter, getCountFromServer, where 
+	} from 'firebase/firestore';
+	import { Search, MapPin, Calendar, Trash2, ChevronLeft, ChevronRight, Users, RotateCcw } from 'lucide-svelte';
 	import MeetingEditModal from '$lib/components/admin/MeetingEditModal.svelte';
-	// [추가] 신청자 관리 모달 import
 	import MeetingApplicantsModal from '$lib/components/admin/MeetingApplicantsModal.svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
 
@@ -14,23 +15,77 @@
 	let isLoading = true;
 	let searchTerm = '';
 
-	// 페이지네이션
+	// 페이지네이션 상태
 	let currentPage = 1;
 	const itemsPerPage = 10;
-
-	// 모달 상태
+	let totalItems = 0;
+	let lastVisible = null;
+	let pageStartDocs = [];
+	
 	let isModalOpen = false;
 	let selectedMeeting = null;
-	
-	// [추가] 신청자 관리 모달 상태 변수
 	let isApplicantModalOpen = false;
 	let meetingForApplicant = null;
 
-	async function fetchMeetings() {
-		isLoading = true;
+	onMount(() => {
+		fetchTotalCount();
+		fetchMeetings();
+	});
+
+	async function fetchTotalCount() {
 		try {
-			const q = query(collection(db, 'meetings'), orderBy('date', 'desc'));
+			const snap = await getCountFromServer(collection(db, 'meetings'));
+			totalItems = snap.data().count;
+		} catch (e) { console.error(e); }
+	}
+
+	async function fetchMeetings(direction = 'next') {
+		isLoading = true;
+
+		try {
+			let q = collection(db, 'meetings');
+			const trimmedTerm = searchTerm.trim().replace(/\s/g, '').toLowerCase();
+
+			// [수정] 검색 로직 변경 (Bi-gram)
+			if (trimmedTerm && trimmedTerm.length >= 2) {
+				q = query(
+					q, 
+					where('_searchKeywords', 'array-contains', trimmedTerm),
+					limit(itemsPerPage)
+				);
+			} else {
+				q = query(q, orderBy('date', 'desc'), limit(itemsPerPage));
+			}
+
+			if (direction === 'next' && lastVisible) {
+				q = query(q, startAfter(lastVisible));
+			} else if (direction === 'prev' && pageStartDocs.length > 1) {
+				const prevDoc = pageStartDocs[currentPage - 2];
+				q = query(q, startAfter(prevDoc));
+				
+				// 1페이지로 복귀 시 쿼리 재설정
+				if (currentPage === 2) {
+					let resetQ = collection(db, 'meetings');
+					if (trimmedTerm && trimmedTerm.length >= 2) {
+						resetQ = query(resetQ, where('_searchKeywords', 'array-contains', trimmedTerm), limit(itemsPerPage));
+					} else {
+						resetQ = query(resetQ, orderBy('date', 'desc'), limit(itemsPerPage));
+					}
+					q = resetQ;
+				}
+			}
+
 			const querySnapshot = await getDocs(q);
+			
+			if (!querySnapshot.empty) {
+				lastVisible = querySnapshot.docs[querySnapshot.docs.length - 1];
+				if (direction === 'next') {
+					if (!pageStartDocs[currentPage - 1]) {
+						pageStartDocs[currentPage - 1] = querySnapshot.docs[0];
+					}
+				}
+			}
+
 			meetings = querySnapshot.docs.map(doc => {
 				const data = doc.data();
 				return {
@@ -53,19 +108,16 @@
 		return meetingDate > now ? 'upcoming' : 'ended';
 	}
 
-	// 모달 열기 (정보 수정)
 	function openEditModal(meeting) {
 		selectedMeeting = meeting;
 		isModalOpen = true;
 	}
 	
-	// [추가] 모달 열기 (신청자 관리)
 	function openApplicantModal(meeting) {
 		meetingForApplicant = meeting;
 		isApplicantModalOpen = true;
 	}
 
-	// 저장 후 처리
 	function handleMeetingSaved(e) {
 		const updatedMeeting = e.detail;
 		updatedMeeting.status = getStatus(updatedMeeting.date);
@@ -79,6 +131,7 @@
 		try {
 			await deleteDoc(doc(db, 'meetings', id));
 			meetings = meetings.filter(m => m.id !== id);
+			totalItems--; 
 			await modal.alert('삭제되었습니다.');
 		} catch (error) { console.error(error); }
 	}
@@ -91,23 +144,54 @@
 		});
 	}
 
-	$: filteredMeetings = meetings.filter(m => 
-		m.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-		m.location?.toLowerCase().includes(searchTerm.toLowerCase())
-	);
-	$: if (searchTerm) currentPage = 1;
-	$: totalPages = Math.ceil(filteredMeetings.length / itemsPerPage);
-	$: paginatedMeetings = filteredMeetings.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-	function goToPage(page) { if (page >= 1 && page <= totalPages) currentPage = page; }
+	function handleSearch() {
+		if (searchTerm.trim().length === 1) {
+			alert('검색어는 2글자 이상 입력해주세요.');
+			return;
+		}
+		currentPage = 1;
+		pageStartDocs = [];
+		lastVisible = null;
+		fetchMeetings();
+	}
 
-	onMount(() => { fetchMeetings(); });
+	function handleReset() {
+		searchTerm = '';
+		currentPage = 1;
+		pageStartDocs = [];
+		lastVisible = null;
+		fetchTotalCount();
+		fetchMeetings();
+	}
+
+	function nextPage() {
+		if (searchTerm && meetings.length < itemsPerPage) return;
+		if (!searchTerm && currentPage >= Math.ceil(totalItems / itemsPerPage)) return;
+		currentPage++;
+		fetchMeetings('next');
+	}
+
+	function prevPage() {
+		if (currentPage > 1) {
+			currentPage--;
+			fetchMeetings('prev');
+		}
+	}
 </script>
 
 <div class="page-header">
-	<h2>모임 관리</h2>
+	<h2>모임 관리 <span class="count">({totalItems}개)</span></h2>
 	<div class="search-box">
 		<Search size={18} color="#718096" />
-		<input type="text" placeholder="모임명 또는 장소 검색" bind:value={searchTerm} />
+		<input 
+			type="text" 
+			placeholder="2글자 이상 입력 (모임명/장소)" 
+			bind:value={searchTerm} 
+			on:keydown={(e) => e.key === 'Enter' && handleSearch()}
+		/>
+		{#if searchTerm}
+			<button class="reset-btn" on:click={handleReset}><RotateCcw size={14} /></button>
+		{/if}
 	</div>
 </div>
 
@@ -128,8 +212,8 @@
 				</tr>
 			</thead>
 			<tbody>
-				{#if paginatedMeetings.length > 0}
-					{#each paginatedMeetings as meeting}
+				{#if meetings.length > 0}
+					{#each meetings as meeting}
 						<tr on:click={() => openEditModal(meeting)} class="clickable-row">
 							<td>
 								<div class="meeting-info">
@@ -181,13 +265,17 @@
 			</tbody>
 		</table>
 
-		{#if totalPages > 1}
-			<div class="pagination">
-				<button class="page-btn" disabled={currentPage === 1} on:click={() => goToPage(currentPage - 1)}><ChevronLeft size={16} /></button>
-				<span class="page-info">Page <strong>{currentPage}</strong> of {totalPages}</span>
-				<button class="page-btn" disabled={currentPage === totalPages} on:click={() => goToPage(currentPage + 1)}><ChevronRight size={16} /></button>
-			</div>
-		{/if}
+		<div class="pagination">
+			<button class="page-btn" disabled={currentPage === 1} on:click={prevPage}><ChevronLeft size={16} /></button>
+			<span class="page-info">Page <strong>{currentPage}</strong></span>
+			<button 
+				class="page-btn" 
+				disabled={meetings.length < itemsPerPage} 
+				on:click={nextPage}
+			>
+				<ChevronRight size={16} />
+			</button>
+		</div>
 	{/if}
 </div>
 
@@ -209,17 +297,17 @@
 <style>
 	/* 기존 스타일 유지 */
 	.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
-	h2 { margin: 0; font-size: 24px; color: #2d3748; }
-	.search-box { display: flex; align-items: center; background: white; padding: 8px 16px;
-	border-radius: 8px; border: 1px solid #e2e8f0; gap: 8px; width: 300px; }
+	h2 { margin: 0; font-size: 24px; color: #2d3748; display: flex; align-items: center; gap: 8px; }
+	.count { font-size: 16px; color: #718096; font-weight: normal; }
+	.search-box { display: flex; align-items: center; background: white; padding: 8px 16px; border-radius: 8px; border: 1px solid #e2e8f0; gap: 8px; width: 300px; }
 	.search-box input { border: none; outline: none; width: 100%; font-size: 14px; }
+	.reset-btn { background: none; border: none; cursor: pointer; color: #a0aec0; padding: 0; display: flex; align-items: center; }
+	.reset-btn:hover { color: #4a5568; }
 
-	.table-container { background: white; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow: hidden; display: flex; flex-direction: column; }
+    .table-container { background: white; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow: hidden; display: flex; flex-direction: column; }
 	table { width: 100%; border-collapse: collapse; min-width: 900px; }
-	th { text-align: left; padding: 16px 24px; background-color: #f7fafc; color: #718096;
-	font-size: 12px; font-weight: 600; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; }
-	td { padding: 16px 24px; border-bottom: 1px solid #edf2f7;
-	vertical-align: middle; font-size: 14px; color: #4a5568; }
+	th { text-align: left; padding: 16px 24px; background-color: #f7fafc; color: #718096; font-size: 12px; font-weight: 600; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; }
+	td { padding: 16px 24px; border-bottom: 1px solid #edf2f7; vertical-align: middle; font-size: 14px; color: #4a5568; }
 	tr:last-child td { border-bottom: none; }
 	.clickable-row { cursor: pointer; transition: background 0.1s; }
 	.clickable-row:hover { background-color: #f0f4f8; }
@@ -242,12 +330,10 @@
 	.status-badge.upcoming { background-color: #c6f6d5; color: #276749; }
 	.status-badge.ended { background-color: #cbd5e0; color: #4a5568; }
 	
-	/* 버튼 그룹 스타일 */
 	.actions-cell { display: flex; gap: 8px; }
 	.icon-btn { background: none; border: none; cursor: pointer; padding: 6px; border-radius: 4px; transition: all 0.2s; color: #a0aec0; }
 	.icon-btn:hover { background-color: #edf2f7; color: #4a5568; }
 	.icon-btn.delete:hover { background-color: #FED7D7; color: #C53030; }
-	/* [추가] 신청자 관리 버튼 스타일 */
 	.icon-btn.applicants:hover { background-color: #E6FFFA; color: #2C7A7B; }
 	
 	.empty-message { text-align: center; padding: 40px; color: #a0aec0; }

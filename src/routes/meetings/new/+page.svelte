@@ -4,20 +4,17 @@
 	import { user, modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-	
 	// [수정] 카테고리 및 디자인용 아이콘 추가 임포트
 	import { 
 		ArrowLeft, Calendar, MapPin, AlignLeft, Type, Grid, Search, Users, Banknote, Info,
 		MessageCircle, Palette, Dumbbell, BookOpen, Plane, MoreHorizontal 
 	} from 'lucide-svelte';
-	
 	import ImageUploader from '$lib/components/ImageUploader.svelte';
 	import { fade, slide } from 'svelte/transition';
 
 	const NAVER_CLIENT_ID = import.meta.env.VITE_NAVER_MAPS_CLIENT_ID;
 
 	let isSubmitting = false;
-	
 	// 폼 데이터 초기값
 	let formData = {
 		title: '',
@@ -29,7 +26,6 @@
 		maxParticipants: 4,
 		cost: ''
 	};
-
 	// [추가] 카테고리 데이터 정의 (아이콘 매핑)
 	const categories = [
 		{ value: '소셜', label: '소셜', icon: MessageCircle, color: '#4299e1' },
@@ -39,7 +35,6 @@
 		{ value: '여행', label: '여행', icon: Plane, color: '#0bc5ea' },
 		{ value: '기타', label: '기타', icon: MoreHorizontal, color: '#718096' }
 	];
-
 	// 지도 관련 상태
 	let mapElement;
 	let mapObject;
@@ -48,13 +43,23 @@
 
 	// 툴팁 상태
 	let showCostInfo = false;
-
 	onMount(async () => {
 		if (!$user) {
 			await modal.alert('모임을 개설하려면 로그인이 필요합니다.');
 			goto('/login');
 		}
 	});
+
+	// [추가] 검색 키워드 생성 유틸리티
+	function generateSearchKeywords(text) {
+		if (!text) return [];
+		const keywords = [];
+		const cleanText = text.replace(/\s/g, '').toLowerCase();
+		for (let i = 0; i < cleanText.length - 1; i++) {
+			keywords.push(cleanText.substring(i, i + 2));
+		}
+		return keywords;
+	}
 
 	function goBack() {
 		history.back();
@@ -64,7 +69,6 @@
 	function searchLocation() {
 		if (!formData.location.trim()) return modal.alert('주소를 입력해주세요.');
 		if (!window.naver) return modal.alert('지도 서비스를 로드하는 중입니다. 잠시 후 다시 시도해주세요.');
-
 		window.naver.maps.Service.geocode({ query: formData.location }, (status, response) => {
 			if (status !== window.naver.maps.Service.Status.OK) {
 				return modal.alert('주소 검색에 실패했습니다.');
@@ -110,7 +114,6 @@
 		if (formData.maxParticipants < 2) return await modal.alert('모집 인원은 최소 2명 이상이어야 합니다.');
 		
 		if (!$user) return await modal.alert('로그인 정보가 없습니다.');
-
 		if (!confirm('이대로 모임을 개설하시겠습니까?')) return;
 
 		isSubmitting = true;
@@ -129,7 +132,12 @@
 				hostName: $user.displayName || '익명 호스트',
 				hostImage: $user.photoURL || '',
 				createdAt: serverTimestamp(),
-				status: 'upcoming'
+				status: 'upcoming',
+				// [수정] 검색 키워드 추가
+				_searchKeywords: [
+					...generateSearchKeywords(formData.title),
+					...generateSearchKeywords(formData.location)
+				]
 			};
 
 			const docRef = await addDoc(collection(db, 'meetings'), meetingData);
@@ -201,7 +209,8 @@
 						>
 							<div 
 								class="cat-icon" 
-								style="background-color: {formData.category === cat.value ? cat.color : '#f7fafc'}; color: {formData.category === cat.value ? '#fff' : cat.color}"
+								style="background-color: {formData.category === cat.value ?
+								cat.color : '#f7fafc'}; color: {formData.category === cat.value ? '#fff' : cat.color}"
 							>
 								<svelte:component this={cat.icon} size={20} />
 							</div>
@@ -284,7 +293,8 @@
 						bind:value={formData.location} 
 						on:keydown={(e) => e.key === 'Enter' && !e.isComposing && searchLocation()}
 					/>
-					<button type="button" class="search-btn" on:click={searchLocation}>
+					<button type="button" class="search-btn" 
+						on:click={searchLocation}>
 						<Search size={20} />
 					</button>
 				</div>
@@ -541,7 +551,8 @@
 	.tooltip {
 		position: absolute;
 		bottom: 100%;
-		right: 0; /* 오른쪽 정렬로 변경하여 화면 밖으로 나가는 것 방지 */
+		right: 0;
+		/* 오른쪽 정렬로 변경하여 화면 밖으로 나가는 것 방지 */
 		background-color: rgba(45, 55, 72, 0.95);
 		color: white;
 		padding: 8px 12px;

@@ -2,9 +2,7 @@
 	import { createEventDispatcher, onMount } from 'svelte';
 	import { modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
-	// [수정] 후기 관련 Firestore 함수 추가 (collection, query, where, getDocs, deleteDoc)
 	import { doc, updateDoc, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
-	// [수정] 아이콘 추가 (Trash2, Star, MessageSquare, Loader2)
 	import { X, Trash2, Star, MessageSquare, Loader2 } from 'lucide-svelte';
 	import ImageUploader from '$lib/components/ImageUploader.svelte';
 
@@ -14,19 +12,27 @@
 	let isSaving = false;
 	let formData = { ...meeting };
 	
-	// [추가] 후기 관련 상태
 	let reviews = [];
 	let isLoadingReviews = false;
 
-	// 날짜 인풋용 포맷 변환 및 후기 로딩
 	onMount(() => {
 		if (formData.date) {
 			formData.dateInput = formData.date.slice(0, 16);
 		}
-		fetchReviews(); // 모달 열릴 때 후기 로딩
+		fetchReviews();
 	});
 
-	// [추가] 후기 목록 불러오기
+	// [추가] 검색 키워드 생성 유틸리티
+	function generateSearchKeywords(text) {
+		if (!text) return [];
+		const keywords = [];
+		const cleanText = text.replace(/\s/g, '').toLowerCase();
+		for (let i = 0; i < cleanText.length - 1; i++) {
+			keywords.push(cleanText.substring(i, i + 2));
+		}
+		return keywords;
+	}
+
 	async function fetchReviews() {
 		isLoadingReviews = true;
 		try {
@@ -36,7 +42,6 @@
 			);
 			const snapshot = await getDocs(q);
 			
-			// 클라이언트 사이드 정렬 (최신순)
 			reviews = snapshot.docs
 				.map(doc => ({ id: doc.id, ...doc.data() }))
 				.sort((a, b) => {
@@ -51,13 +56,12 @@
 		}
 	}
 
-	// [추가] 후기 삭제 함수
 	async function deleteReview(reviewId) {
 		if (!await modal.confirm('정말로 이 후기를 삭제하시겠습니까?')) return;
 
 		try {
 			await deleteDoc(doc(db, 'meeting_reviews', reviewId));
-			reviews = reviews.filter(r => r.id !== reviewId); // UI 업데이트
+			reviews = reviews.filter(r => r.id !== reviewId);
 			await modal.alert('후기가 삭제되었습니다.');
 		} catch (error) {
 			console.error("후기 삭제 실패:", error);
@@ -65,7 +69,6 @@
 		}
 	}
 
-	// [추가] 날짜 포맷팅
 	function formatReviewDate(timestamp) {
 		if (!timestamp) return '-';
 		const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -85,11 +88,15 @@
 				date: isoDate,
 				location: formData.location,
 				description: formData.description || '',
-				hostName: formData.hostName
+				hostName: formData.hostName,
+				// [수정] 검색용 키워드 업데이트
+				_searchKeywords: [
+					...generateSearchKeywords(formData.title),
+					...generateSearchKeywords(formData.location)
+				]
 			};
 
 			await updateDoc(meetingRef, updates);
-			
 			dispatch('save', { ...formData, ...updates, date: isoDate });
 			await modal.alert('모임 정보가 수정되었습니다.');
 		} catch (error) {
@@ -207,33 +214,40 @@
 </div>
 
 <style>
-	/* 공통 모달 스타일 */
-	.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 9999; display: flex; align-items: center; justify-content: center; }
-	.modal-content { background: white; width: 600px; max-height: 90vh; border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 10px 25px rgba(0,0,0,0.2); overflow: hidden; }
-	.modal-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
-	.modal-header h3 { margin: 0; font-size: 18px; color: #2d3748; }
+	.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+		background-color: rgba(0,0,0,0.5); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+	.modal-content { background: white; width: 600px; max-height: 90vh; border-radius: 12px;
+		display: flex; flex-direction: column; box-shadow: 0 10px 25px rgba(0,0,0,0.2); overflow: hidden; }
+	.modal-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0;
+		display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+	.modal-header h3 { margin: 0; font-size: 18px; color: #2d3748;
+	}
 	.close-btn { background: none; border: none; cursor: pointer; color: #a0aec0; }
 	
-	.modal-body { padding: 24px; display: flex; flex-direction: column; gap: 32px; overflow-y: auto; flex: 1; }
-	.modal-footer { padding: 16px 24px; background-color: #f7fafc; display: flex; justify-content: flex-end; gap: 12px; border-top: 1px solid #e2e8f0; flex-shrink: 0; }
+	.modal-body { padding: 24px; display: flex; flex-direction: column; gap: 32px;
+		overflow-y: auto; flex: 1; }
+	.modal-footer { padding: 16px 24px; background-color: #f7fafc; display: flex; justify-content: flex-end; gap: 12px;
+		border-top: 1px solid #e2e8f0; flex-shrink: 0; }
 	
-	/* 폼 스타일 */
-	.form-section { display: flex; flex-direction: column; gap: 16px; }
+	.form-section { display: flex; flex-direction: column; gap: 16px;
+	}
 	.form-row { display: flex; gap: 16px; }
 	.form-row .form-group { flex: 1; }
-	.form-group { display: flex; flex-direction: column; gap: 6px; }
+	.form-group { display: flex; flex-direction: column; gap: 6px;
+	}
 	label { font-size: 13px; font-weight: 600; color: #4a5568; }
-	input, textarea { padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 14px; width: 100%; box-sizing: border-box; }
+	input, textarea { padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px;
+		font-size: 14px; width: 100%; box-sizing: border-box; }
 	textarea { resize: vertical; }
 
-	/* [추가] 후기 섹션 스타일 */
 	.review-section {
 		border-top: 1px solid #e2e8f0;
 		padding-top: 20px;
 	}
 	.section-header h4 { margin: 0 0 12px 0; font-size: 15px; color: #2d3748; }
 	
-	.review-list { display: flex; flex-direction: column; gap: 8px; }
+	.review-list { display: flex; flex-direction: column;
+		gap: 8px; }
 	.review-item {
 		background-color: #f9fafb;
 		border: 1px solid #edf2f7;
@@ -241,26 +255,34 @@
 		padding: 12px;
 		font-size: 13px;
 	}
-	.review-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+	.review-header { display: flex;
+		justify-content: space-between; align-items: center; margin-bottom: 6px; }
 	.reviewer-info { display: flex; align-items: center; gap: 6px; }
-	.name { font-weight: 600; color: #2d3748; }
+	.name { font-weight: 600; color: #2d3748;
+	}
 	.rating { display: flex; align-items: center; gap: 2px; font-size: 11px; color: #b7791f; font-weight: bold; }
-	.date { color: #a0aec0; font-size: 11px; }
+	.date { color: #a0aec0; font-size: 11px;
+	}
 	.review-content { color: #4a5568; line-height: 1.4; margin-bottom: 8px; }
 	
 	.delete-review-btn {
 		display: flex; align-items: center; gap: 4px;
-		background: none; border: 1px solid #feb2b2; border-radius: 4px;
+		background: none;
+		border: 1px solid #feb2b2; border-radius: 4px;
 		padding: 4px 8px; font-size: 11px; color: #c53030; background-color: #fff5f5;
 		cursor: pointer; margin-left: auto;
 	}
 	.delete-review-btn:hover { background-color: #fed7d7; }
 
-	.loading-state, .empty-state { text-align: center; padding: 20px; color: #a0aec0; display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 13px; }
+	.loading-state, .empty-state { text-align: center; padding: 20px; color: #a0aec0; display: flex; flex-direction: column; align-items: center;
+		gap: 8px; font-size: 13px; }
 	.spin { animation: spin 1s linear infinite; }
-	@keyframes spin { 100% { transform: rotate(360deg); } }
+	@keyframes spin { 100% { transform: rotate(360deg);
+	} }
 
-	.cancel-btn { background: white; border: 1px solid #e2e8f0; padding: 8px 16px; border-radius: 6px; cursor: pointer; color: #4a5568; font-weight: 500; }
-	.submit-btn { background: #3182ce; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; color: white; font-weight: 600; }
+	.cancel-btn { background: white; border: 1px solid #e2e8f0; padding: 8px 16px; border-radius: 6px; cursor: pointer; color: #4a5568; font-weight: 500;
+	}
+	.submit-btn { background: #3182ce; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; color: white; font-weight: 600;
+	}
 	.submit-btn:disabled { background-color: #cbd5e0; cursor: not-allowed; }
 </style>

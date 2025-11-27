@@ -18,7 +18,6 @@
 	} from 'lucide-svelte';
 	import ImageUploader from '$lib/components/ImageUploader.svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
-
 	// 프로필 데이터 상태
 	let profile = {
 		nickname: '',
@@ -29,11 +28,9 @@
 		intro: '',
 		image: ''
 	};
-
 	let isLoading = true;
 	let isEditing = false;
 	let editForm = {};
-
 	// 기본 태그 목록
 	const defaultInterests = [
 		'운동', '러닝', '등산', '헬스', '요가',
@@ -42,11 +39,9 @@
 		'코딩', '주식', '부동산', '재테크', '영어',
 		'게임', '반려동물', '봉사', '드라이브'
 	];
-
 	$: interestOptions = $appSettings.interestTags && $appSettings.interestTags.length > 0 
 		? $appSettings.interestTags 
 		: defaultInterests;
-
 	// 멤버십 정보
 	let membership = {
 		type: 'Basic',
@@ -60,7 +55,6 @@
 		totalMeetings: 0,
 		peopleMet: 0
 	};
-
 	// 대화평
 	let reviews = [
 		{ id: '1', text: '👂 경청을 잘해요', count: 0, color: '#e3f2fd', textColor: '#1976d2' },
@@ -68,7 +62,6 @@
 		{ id: '3', text: '💡 통찰력이 있어요', count: 0, color: '#e8f5e9', textColor: '#388e3c' },
 		{ id: '4', text: '🍯 목소리가 꿀', count: 0, color: '#f3e5f5', textColor: '#7b1fa2' }
 	];
-
 	// [추가] 1표 이상 획득한 뱃지만 필터링
 	$: activeReviews = reviews.filter(r => r.count > 0);
 
@@ -76,6 +69,17 @@
 		loadUserData($user);
 	} else if (!$user && !isLoading) {
 		// 로그아웃 처리
+	}
+
+	// [추가] 검색 키워드 생성 유틸리티
+	function generateSearchKeywords(text) {
+		if (!text) return [];
+		const keywords = [];
+		const cleanText = text.replace(/\s/g, '').toLowerCase();
+		for (let i = 0; i < cleanText.length - 1; i++) {
+			keywords.push(cleanText.substring(i, i + 2));
+		}
+		return keywords;
 	}
 
 	async function loadUserData(currentUser) {
@@ -119,7 +123,12 @@
 					image: currentUser.photoURL || 'https://placehold.co/200x200/333/fff?text=ME',
 					email: currentUser.email,
 					membership: 'Basic',
-					createdAt: new Date().toISOString()
+					createdAt: new Date().toISOString(),
+					// [추가] 초기 생성 시 키워드 저장
+					_searchKeywords: [
+						...generateSearchKeywords(currentUser.displayName || '익명 유저'),
+						...generateSearchKeywords(currentUser.email?.split('@')[0])
+					]
 				};
 				await setDoc(userRef, newProfile);
 				profile = newProfile;
@@ -182,14 +191,18 @@
 
 		try {
 			const userRef = doc(db, 'users', $user.uid);
-			
 			const updateData = {
 				nickname: editForm.nickname,
 				age: Number(editForm.age),
 				gender: editForm.gender,
 				job: editForm.job,
 				interests: editForm.interests,
-				image: editForm.image
+				image: editForm.image,
+				// [추가] 수정 시 키워드 업데이트
+				_searchKeywords: [
+					...generateSearchKeywords(editForm.nickname),
+					...generateSearchKeywords($user.email?.split('@')[0])
+				]
 			};
 
 			await updateDoc(userRef, updateData);
@@ -288,7 +301,8 @@
 								<div class="interest-selector">
 								{#each interestOptions as option}
 									<button 
-										class="interest-chip {editForm.interests.includes(option) ? 'selected' : ''}"
+										class="interest-chip {editForm.interests.includes(option) ?
+										'selected' : ''}"
 										on:click={() => toggleInterest(option)}
 									>
 										{option}
@@ -366,7 +380,8 @@
 						<Crown size={20} color="#FFD700" />
 						<span class="plan-name">{membership.type}</span>
 					</div>
-					<span class="active-badge {membership.status}">{membership.status === 'active' ? '구독중' : '미구독'}</span>
+					<span class="active-badge {membership.status}">{membership.status === 'active' ?
+					'구독중' : '미구독'}</span>
 				</div>
 				<div class="card-body">
 					<p class="price-info">월 {membership.price}</p>
@@ -410,76 +425,111 @@
 </div>
 
 <style>
-	.page-container { padding: 20px 16px; padding-bottom: 40px; }
+	.page-container { padding: 20px 16px; padding-bottom: 40px;
+	}
 	.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
 	.header-actions { display: flex; gap: 8px; }
-	.page-title { font-size: 22px; font-weight: bold; margin: 0; }
-	.icon-btn { background: none; border: none; cursor: pointer; padding: 6px; color: #333; border-radius: 50%; transition: background-color 0.2s; }
+	.page-title { font-size: 22px;
+		font-weight: bold; margin: 0; }
+	.icon-btn { background: none; border: none; cursor: pointer; padding: 6px; color: #333; border-radius: 50%;
+		transition: background-color 0.2s; }
 	.icon-btn:hover { background-color: #f0f0f0; }
 	.logout-btn { color: #e53e3e; }
-	.empty-state { text-align: center; padding: 40px 0; color: #666; }
+	.empty-state { text-align: center; padding: 40px 0; color: #666;
+	}
 	.login-link { display: inline-block; margin-top: 10px; color: #1976d2; text-decoration: underline; }
 
-	.profile-section { display: flex; flex-direction: column; align-items: center; margin-bottom: 32px; }
+	.profile-section { display: flex; flex-direction: column; align-items: center; margin-bottom: 32px;
+	}
 	.avatar-container { margin-bottom: 16px; }
-	.avatar-wrapper { width: 100px; height: 100px; border-radius: 10%; overflow: visible; position: relative; border: 3px solid white; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+	.avatar-wrapper { width: 100px; height: 100px; border-radius: 10%; overflow: visible; position: relative; border: 3px solid white;
+		box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
 	
 	.avatar-wrapper img { width: 100%; height: 100%; object-fit: cover; }
 
-	.info-container { width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+	.info-container { width: 100%; display: flex;
+		flex-direction: column; align-items: center; justify-content: center; }
 	.display-info { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-	.nickname { font-size: 20px; font-weight: bold; margin: 0; }
+	.nickname { font-size: 20px;
+		font-weight: bold; margin: 0; }
 	.age { font-weight: normal; font-size: 16px; color: #666; }
-	.email-text { font-size: 13px; color: #999; margin: 12px 0 0 0; }
-	.edit-btn { background-color: #f0f0f0; border: none; padding: 6px 10px; border-radius: 16px; font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer; color: #555; }
+	.email-text { font-size: 13px; color: #999;
+		margin: 12px 0 0 0; }
+	.edit-btn { background-color: #f0f0f0; border: none; padding: 6px 10px; border-radius: 16px; font-size: 12px; display: flex;
+		align-items: center; gap: 4px; cursor: pointer; color: #555; }
 
-	.sub-info { display: flex; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; justify-content: center; }
-	.info-item { display: flex; align-items: center; gap: 4px; font-size: 13px; color: #555; background-color: #f5f7fa; padding: 4px 8px; border-radius: 6px; }
+	.sub-info { display: flex; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; justify-content: center;
+	}
+	.info-item { display: flex; align-items: center; gap: 4px; font-size: 13px; color: #555; background-color: #f5f7fa; padding: 4px 8px; border-radius: 6px;
+	}
 	.interests-display { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; max-width: 280px; margin-top: 4px; }
-	.interest-tag { font-size: 12px; color: #3182ce; background-color: #ebf8ff; padding: 2px 8px; border-radius: 12px; font-weight: 500; }
+	.interest-tag { font-size: 12px; color: #3182ce;
+		background-color: #ebf8ff; padding: 2px 8px; border-radius: 12px; font-weight: 500; }
 
-	.edit-form { display: flex; flex-direction: column; gap: 16px; width: 100%; max-width: 320px; background-color: #fff; padding: 20px; border-radius: 16px; border: 1px solid #eee; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
+	.edit-form { display: flex; flex-direction: column; gap: 16px; width: 100%;
+		max-width: 320px; background-color: #fff; padding: 20px; border-radius: 16px; border: 1px solid #eee; box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+	}
 	.form-row { display: flex; gap: 12px; }
 	.input-group { display: flex; flex-direction: column; gap: 6px; }
-	.input-group.half { flex: 1; }
+	.input-group.half { flex: 1;
+	}
 	.input-group label { font-size: 13px; color: #666; font-weight: bold; margin-left: 2px; }
-	.input-group input, .input-group select { width: 100%; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; box-sizing: border-box; transition: border-color 0.2s; background-color: #fff; }
+	.input-group input, .input-group select { width: 100%;
+		padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; box-sizing: border-box; transition: border-color 0.2s; background-color: #fff;
+	}
 	.input-group input:focus, .input-group select:focus { border-color: #3182ce; outline: none; }
 
-	.interest-selector { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
-	.interest-chip { background-color: #f7fafc; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 20px; font-size: 13px; color: #4a5568; cursor: pointer; transition: all 0.2s; }
+	.interest-selector { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px;
+	}
+	.interest-chip { background-color: #f7fafc; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 20px; font-size: 13px; color: #4a5568; cursor: pointer;
+		transition: all 0.2s; }
 	.interest-chip.selected { background-color: #3182ce; color: white; border-color: #3182ce; font-weight: bold; }
 
-	.save-btn { margin-top: 12px; background-color: #1a1a1a; color: white; border: none; padding: 14px; border-radius: 10px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 15px; }
+	.save-btn { margin-top: 12px; background-color: #1a1a1a;
+		color: white; border: none; padding: 14px; border-radius: 10px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+		font-size: 15px; }
 
 	.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px; }
-	.stat-card { background-color: white; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; align-items: center; gap: 12px; }
-	.stat-icon { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+	.stat-card { background-color: white; padding: 16px;
+		border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; align-items: center; gap: 12px; }
+	.stat-icon { width: 40px; height: 40px;
+		border-radius: 12px; display: flex; align-items: center; justify-content: center; }
 	.bg-blue { background-color: #e3f2fd; }
 	.bg-orange { background-color: #fff3e0; }
-	.stat-info { display: flex; flex-direction: column; }
+	.stat-info { display: flex;
+		flex-direction: column; }
 	.stat-label { font-size: 12px; color: #888; }
 	.stat-value { font-size: 16px; font-weight: bold; color: #333; }
 
-	.section { margin-bottom: 24px; }
-	.section-header { font-size: 16px; font-weight: bold; margin: 0 0 12px 0; color: #333; }
+	.section { margin-bottom: 24px;
+	}
+	.section-header { font-size: 16px; font-weight: bold; margin: 0 0 12px 0; color: #333;
+	}
 
-	.membership-card { background: linear-gradient(135deg, #333 0%, #555 100%); color: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+	.membership-card { background: linear-gradient(135deg, #333 0%, #555 100%); color: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+	}
 	.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-	.plan-info { display: flex; align-items: center; gap: 8px; }
+	.plan-info { display: flex; align-items: center; gap: 8px;
+	}
 	.plan-name { font-size: 18px; font-weight: bold; }
-	.active-badge { background-color: rgba(255,255,255,0.2); font-size: 11px; padding: 4px 8px; border-radius: 12px; font-weight: bold; }
+	.active-badge { background-color: rgba(255,255,255,0.2); font-size: 11px; padding: 4px 8px; border-radius: 12px; font-weight: bold;
+	}
 	.active-badge.inactive { background-color: #999; color: #eee; }
-	.price-info { font-size: 24px; font-weight: bold; margin: 0 0 4px 0; }
+	.price-info { font-size: 24px; font-weight: bold; margin: 0 0 4px 0;
+	}
 	.billing-date { font-size: 13px; color: rgba(255,255,255,0.7); margin: 0; }
-	.card-footer { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.1); }
-	.manage-btn { background: none; border: 1px solid rgba(255,255,255,0.4); color: white; padding: 8px 12px; border-radius: 20px; font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: background 0.2s; }
+	.card-footer { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.1);
+	}
+	.manage-btn { background: none; border: 1px solid rgba(255,255,255,0.4); color: white; padding: 8px 12px; border-radius: 20px; font-size: 12px; cursor: pointer;
+		display: flex; align-items: center; gap: 6px; transition: background 0.2s; }
 	.manage-btn:hover { background-color: rgba(255,255,255,0.1); }
 
-	.review-tags { display: flex; flex-wrap: wrap; gap: 8px; }
-	.tag { padding: 8px 12px; border-radius: 20px; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
+	.review-tags { display: flex; flex-wrap: wrap;
+		gap: 8px; }
+	.tag { padding: 8px 12px; border-radius: 20px; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px;
+	}
 	.tag-count { font-size: 11px; font-weight: bold; opacity: 0.8; }
 	
-	/* [추가] 빈 상태 텍스트 스타일 */
-	.empty-text { font-size: 14px; color: #999; margin: 0; }
+	.empty-text { font-size: 14px; color: #999;
+		margin: 0; }
 </style>

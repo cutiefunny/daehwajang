@@ -1,8 +1,19 @@
 <script>
 	import { onMount } from 'svelte';
 	import { db } from '$lib/firebase';
-	import { collection, getDocs, query, orderBy, doc, updateDoc } from 'firebase/firestore';
-	import { Search, CheckCircle, XCircle, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-svelte';
+	import { 
+		collection, 
+		getDocs, 
+		query, 
+		orderBy, 
+		doc, 
+		updateDoc, 
+		limit, 
+		startAfter, 
+		getCountFromServer,
+		where 
+	} from 'firebase/firestore';
+	import { Search, CheckCircle, XCircle, AlertCircle, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-svelte';
 	import UserEditModal from '$lib/components/admin/UserEditModal.svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
 
@@ -10,21 +21,86 @@
 	let isLoading = true;
 	let searchTerm = '';
 
-	// 페이지네이션
+	// 페이지네이션 상태
 	let currentPage = 1;
 	const itemsPerPage = 10;
+	let totalItems = 0;
+	let lastVisible = null; 
+	let pageStartDocs = []; 
 
-	// 모달 상태
 	let isModalOpen = false;
 	let selectedUser = null;
 
-	// 회원 목록 불러오기
-	async function fetchUsers() {
+	onMount(() => {
+		fetchTotalCount();
+		fetchUsers(); 
+	});
+
+	async function fetchTotalCount() {
+		try {
+			const coll = collection(db, 'users');
+			const snapshot = await getCountFromServer(coll);
+			totalItems = snapshot.data().count;
+		} catch (error) {
+			console.error("카운트 로딩 실패:", error);
+		}
+	}
+
+	async function fetchUsers(direction = 'next') {
 		isLoading = true;
 		try {
-			const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
+			let q = collection(db, 'users');
+			const trimmedTerm = searchTerm.trim().replace(/\s/g, '').toLowerCase();
+			
+			// [수정] 검색 로직 변경 (Bi-gram)
+			if (trimmedTerm && trimmedTerm.length >= 2) {
+				// 2글자 이상일 경우 _searchKeywords 배열에 포함되어 있는지 검사
+				q = query(
+					q, 
+					where('_searchKeywords', 'array-contains', trimmedTerm),
+					limit(itemsPerPage)
+				);
+			} else {
+				// 검색어가 없거나 1글자인 경우 기본 정렬
+				q = query(q, orderBy('createdAt', 'desc'), limit(itemsPerPage));
+			}
+
+			// 페이지네이션 (검색 중일 때는 단순 이전/다음만 지원하거나, 
+			// orderBy와 복합 인덱스가 없으면 커서 페이징이 까다로울 수 있어 주의)
+			if (direction === 'next' && lastVisible) {
+				q = query(q, startAfter(lastVisible));
+			} else if (direction === 'prev' && pageStartDocs.length > 1) {
+				const prevDoc = pageStartDocs[currentPage - 2];
+				q = query(q, startAfter(prevDoc));
+				
+				if (currentPage === 2) {
+					// 1페이지로 돌아갈 때 쿼리 초기화
+					let resetQ = collection(db, 'users');
+					if (trimmedTerm && trimmedTerm.length >= 2) {
+						resetQ = query(resetQ, 
+							where('_searchKeywords', 'array-contains', trimmedTerm),
+							limit(itemsPerPage)
+						);
+					} else {
+						resetQ = query(resetQ, orderBy('createdAt', 'desc'), limit(itemsPerPage));
+					}
+					q = resetQ;
+				}
+			} else if (currentPage === 1) {
+				// 초기 로딩
+			}
+
 			const querySnapshot = await getDocs(q);
 			
+			if (!querySnapshot.empty) {
+				lastVisible = querySnapshot.docs[querySnapshot.docs.length - 1];
+				if (direction === 'next') {
+					if (!pageStartDocs[currentPage - 1]) {
+						pageStartDocs[currentPage - 1] = querySnapshot.docs[0];
+					}
+				}
+			}
+
 			users = querySnapshot.docs.map(doc => {
 				const data = doc.data();
 				return {
@@ -35,6 +111,7 @@
 					status: data.status || 'active'
 				};
 			});
+
 		} catch (error) {
 			console.error("회원 목록 로딩 실패:", error);
 		} finally {
@@ -42,7 +119,40 @@
 		}
 	}
 
-	// 상태 변경 (리스트에서 바로 변경)
+	function handleSearch() {
+		if (searchTerm.trim().length === 1) {
+			alert('검색어는 2글자 이상 입력해주세요.');
+			return;
+		}
+		currentPage = 1;
+		pageStartDocs = [];
+		lastVisible = null;
+		fetchUsers();
+	}
+
+	function handleReset() {
+		searchTerm = '';
+		currentPage = 1;
+		pageStartDocs = [];
+		lastVisible = null;
+		fetchUsers();
+		fetchTotalCount();
+	}
+
+	async function changePage(newPage) {
+		if (newPage > currentPage) {
+			await fetchUsers('next');
+			currentPage = newPage;
+		} else if (newPage < currentPage) {
+			if (newPage === 1) {
+				handleReset(); // 1페이지 이동 시 리셋처럼 처리
+			} else {
+				await fetchUsers('prev');
+				currentPage = newPage;
+			}
+		}
+	}
+
 	async function toggleStatus(user) {
 		const newStatus = user.status === 'active' ? 'suspended' : 'active';
 		if (!confirm(`${user.nickname} 님의 상태를 변경하시겠습니까?`)) return;
@@ -59,13 +169,11 @@
 		return new Date(isoString).toLocaleDateString('ko-KR');
 	}
 
-	// 모달 열기
 	function openEditModal(user) {
 		selectedUser = user;
 		isModalOpen = true;
 	}
 
-	// 저장 완료 후 처리 (컴포넌트 이벤트)
 	function handleUserSaved(e) {
 		const updatedUser = e.detail;
 		users = users.map(u => u.id === updatedUser.id ? updatedUser : u);
@@ -73,31 +181,30 @@
 		selectedUser = null;
 	}
 
-	// 검색 및 페이지네이션
-	$: filteredUsers = users.filter(user => 
-		user.nickname?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-		user.email?.toLowerCase().includes(searchTerm.toLowerCase())
-	);
-	$: if (searchTerm) currentPage = 1;
-	$: totalPages = Math.ceil(filteredUsers.length / itemsPerPage);
-	$: paginatedUsers = filteredUsers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-
-	function goToPage(page) { if (page >= 1 && page <= totalPages) currentPage = page; }
-
-	onMount(() => { fetchUsers(); });
+	$: totalPages = Math.ceil(totalItems / itemsPerPage);
 </script>
 
 <div class="page-header">
-	<h2>회원 관리</h2>
+	<h2>회원 관리 <span class="count">({totalItems}명)</span></h2>
 	<div class="search-box">
 		<Search size={18} color="#718096" />
-		<input type="text" placeholder="이름 또는 이메일 검색" bind:value={searchTerm} />
+		<input 
+			type="text" 
+			placeholder="2글자 이상 입력 (닉네임/이메일)" 
+			bind:value={searchTerm} 
+			on:keydown={(e) => e.key === 'Enter' && handleSearch()}
+		/>
+		{#if searchTerm}
+			<button class="reset-btn" on:click={handleReset}>
+				<RotateCcw size={14} />
+			</button>
+		{/if}
 	</div>
 </div>
 
 <div class="table-container">
 	{#if isLoading}
-		<Skeleton />
+		<Skeleton count={5} />
 	{:else}
 		<table>
 			<thead>
@@ -113,8 +220,8 @@
 				</tr>
 			</thead>
 			<tbody>
-				{#if paginatedUsers.length > 0}
-					{#each paginatedUsers as user}
+				{#if users.length > 0}
+					{#each users as user}
 						<tr on:click={() => openEditModal(user)} class="clickable-row">
 							<td>
 								<div class="avatar">
@@ -157,13 +264,15 @@
 			</tbody>
 		</table>
 
-		{#if totalPages > 1}
-			<div class="pagination">
-				<button class="page-btn" disabled={currentPage === 1} on:click={() => goToPage(currentPage - 1)}><ChevronLeft size={16} /></button>
-				<span class="page-info">Page <strong>{currentPage}</strong> of {totalPages}</span>
-				<button class="page-btn" disabled={currentPage === totalPages} on:click={() => goToPage(currentPage + 1)}><ChevronRight size={16} /></button>
-			</div>
-		{/if}
+		<div class="pagination">
+			<button class="page-btn" disabled={currentPage === 1} on:click={() => changePage(currentPage - 1)}>
+				<ChevronLeft size={16} />
+			</button>
+			<span class="page-info">Page <strong>{currentPage}</strong></span>
+			<button class="page-btn" disabled={users.length < itemsPerPage} on:click={() => changePage(currentPage + 1)}>
+				<ChevronRight size={16} />
+			</button>
+		</div>
 	{/if}
 </div>
 
@@ -177,9 +286,13 @@
 
 <style>
 	.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
-	h2 { margin: 0; font-size: 24px; color: #2d3748; }
+	h2 { margin: 0; font-size: 24px; color: #2d3748; display: flex; align-items: center; gap: 8px; }
+	.count { font-size: 16px; color: #718096; font-weight: normal; }
+	
 	.search-box { display: flex; align-items: center; background: white; padding: 8px 16px; border-radius: 8px; border: 1px solid #e2e8f0; gap: 8px; width: 300px; }
 	.search-box input { border: none; outline: none; width: 100%; font-size: 14px; }
+	.reset-btn { background: none; border: none; cursor: pointer; color: #a0aec0; padding: 0; display: flex; align-items: center; }
+	.reset-btn:hover { color: #4a5568; }
 
 	.table-container { background: white; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow: hidden; display: flex; flex-direction: column; }
 	table { width: 100%; border-collapse: collapse; min-width: 800px; }
