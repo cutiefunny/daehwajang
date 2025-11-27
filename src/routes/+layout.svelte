@@ -2,7 +2,10 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { user, appSettings, notifications } from '$lib/stores';
+	import { user, appSettings, notifications, toast } from '$lib/stores';
+	import { db } from '$lib/firebase';
+	import { collection, query, where, orderBy, onSnapshot, limit } from 'firebase/firestore';
+	import { onMount, onDestroy } from 'svelte';
 	import { Search, Home, MessageSquare, User, BookOpen, LogIn, X, Bell, Trash2 } from 'lucide-svelte';
 	import ConfirmModal from '$lib/components/ConfirmModal.svelte';
 	import ToastContainer from '$lib/components/ToastContainer.svelte';
@@ -14,16 +17,75 @@
 	const isActive = (path) => $page.url.pathname === path;
 	let isAdminPage = $derived($page.url.pathname.startsWith('/admin'));
 
-	// Svelte 5 Runes 문법($state) 적용
-	let isSearchOpen = $state(false);
-	let isNotificationOpen = $state(false); // [추가] 알림창 상태
-	let globalSearchQuery = $state('');
+	// Svelte 4 호환 문법
+	let isSearchOpen = false;
+	let isNotificationOpen = false;
+	let globalSearchQuery = '';
 	let searchInputRef;
+	let notiUnsubscribe = null;
+
+	// Firestore 알림 리스너
+	function subscribeToNotifications(userId) {
+		if (notiUnsubscribe) notiUnsubscribe();
+
+		const q = query(
+			collection(db, 'notifications'),
+			where('targetUserId', '==', userId),
+			orderBy('timestamp', 'desc'),
+			limit(50)
+		);
+
+		notiUnsubscribe = onSnapshot(q, (snapshot) => {
+			// 1. 새로운 알림 감지 (실시간 알림 효과)
+			snapshot.docChanges().forEach((change) => {
+				if (change.type === 'added') {
+					const data = change.doc.data();
+					
+					// 타임스탬프 확인 (최근 10초 내에 생성된 알림만 팝업)
+					// (페이지 새로고침 시 과거 알림이 우르르 뜨는 것을 방지)
+					const notiTime = data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
+					const now = new Date();
+					
+					// [수정] 브라우저 알림 제거, 토스트만 유지
+					if (now - notiTime < 10000) { 
+						toast.send(data.title); 
+					}
+				}
+			});
+
+			// 2. 스토어 데이터 동기화
+			const loadedNotis = snapshot.docs.map(doc => ({
+				id: doc.id,
+				...doc.data(),
+				timestamp: doc.data().timestamp?.toDate().toISOString() || new Date().toISOString()
+			}));
+			
+			notifications.set(loadedNotis);
+		});
+	}
+
+	// 로그인 상태 변경 감지 및 리스너 연결
+	$effect(() => {
+		if (!$user) {
+			if (notiUnsubscribe) { notiUnsubscribe(); notiUnsubscribe = null; }
+			notifications.clear();
+			return;
+		}
+
+		subscribeToNotifications($user.uid);
+
+		return () => {
+			if (notiUnsubscribe) { notiUnsubscribe(); notiUnsubscribe = null; }
+		};
+	});
+
+	onDestroy(() => {
+		if (notiUnsubscribe) notiUnsubscribe();
+	});
 
 	function toggleSearch() {
 		isSearchOpen = !isSearchOpen;
 		if (isSearchOpen) {
-			// 검색 열릴 때 알림창 닫기
 			isNotificationOpen = false;
 			setTimeout(() => searchInputRef?.focus(), 100);
 		} else {
@@ -31,13 +93,10 @@
 		}
 	}
 
-	// [추가] 알림창 토글
 	function toggleNotification() {
 		isNotificationOpen = !isNotificationOpen;
 		if (isNotificationOpen) {
-			isSearchOpen = false; // 알림 열릴 때 검색 닫기
-			// 열릴 때 모두 읽음 처리
-			notifications.markAllRead();
+			isSearchOpen = false;
 		}
 	}
 
@@ -53,8 +112,8 @@
 		if (e.key === 'Escape') toggleSearch();
 	}
 
-	// [추가] 시간 포맷팅
 	function formatTime(isoString) {
+		if (!isoString) return '';
 		const date = new Date(isoString);
 		const now = new Date();
 		const diff = (now - date) / 1000;
@@ -63,6 +122,13 @@
 		if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
 		if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
 		return date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+	}
+	
+	function handleNotificationClick(noti) {
+		if (noti.link) {
+			goto(noti.link);
+			isNotificationOpen = false;
+		}
 	}
 </script>
 
@@ -119,7 +185,13 @@
 					<div class="noti-list">
 						{#if $notifications.length > 0}
 							{#each $notifications as noti (noti.id)}
-								<div class="noti-item">
+								<div 
+									class="noti-item {noti.read ? 'read' : 'unread'}" 
+									on:click={() => handleNotificationClick(noti)}
+									role="button"
+									tabindex="0"
+									on:keydown={(e) => e.key === 'Enter' && handleNotificationClick(noti)}
+								>
 									<div class="noti-content">
 										<p class="noti-title">{noti.title}</p>
 										<p class="noti-body">{noti.body}</p>
@@ -238,7 +310,6 @@
 
 	.logo { font-size: 20px; font-weight: bold; margin: 0; }
 	
-	/* [추가] 헤더 액션 버튼 그룹 */
 	.header-actions { display: flex; gap: 4px; align-items: center; }
 
 	.icon-btn { background: none;
@@ -247,14 +318,12 @@
 		position: relative;
 	}
 	
-	/* [추가] 알림 뱃지 점 */
 	.badge-dot {
 		position: absolute; top: 8px; right: 8px;
 		width: 6px; height: 6px; background-color: #e53e3e;
 		border-radius: 50%; border: 1px solid white;
 	}
 
-	/* [추가] 알림 영역 스타일 */
 	.notification-area {
 		background-color: #f9fafb;
 		border-top: 1px solid #f0f0f0;
@@ -277,8 +346,9 @@
 	.noti-item {
 		padding: 12px 16px; border-bottom: 1px solid #f0f0f0;
 		display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
-		background-color: white;
+		background-color: white; cursor: pointer; transition: background 0.2s;
 	}
+	.noti-item:hover { background-color: #fafafa; }
 	.noti-item:last-child { border-bottom: none; }
 	
 	.noti-content { flex: 1; }
@@ -292,7 +362,6 @@
 	}
 	.empty-noti p { margin: 0; font-size: 13px; }
 
-	/* 검색 영역 */
 	.header-search-area {
 		padding: 0 16px 16px 16px;
 		width: 100%;
