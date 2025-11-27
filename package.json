@@ -8,6 +8,7 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
+		"smoke-delete-test": "node scripts/smoke-delete-test.js",
 		"format": "prettier --write .",
 		"lint": "prettier --check ."
 	},
@@ -24,6 +25,7 @@
 	"dependencies": {
 		"embla-carousel-svelte": "^8.6.0",
 		"firebase": "^12.6.0",
+		"firebase-admin": "^13.6.0",
 		"lucide-svelte": "^0.554.0"
 	}
 }

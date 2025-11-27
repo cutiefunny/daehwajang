@@ -3,9 +3,10 @@
 	import { modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { 
-		collection, getDocs, query, orderBy, doc, deleteDoc, 
-		limit, startAfter, getCountFromServer, where 
-	} from 'firebase/firestore';
+				collection, getDocs, query, orderBy, doc, deleteDoc, getDoc,
+				limit, startAfter, getCountFromServer, where 
+			} from 'firebase/firestore';
+	import { deleteFileByUrl } from '$lib/firebase';
 	import { Search, MapPin, Calendar, Trash2, ChevronLeft, ChevronRight, Users, RotateCcw } from 'lucide-svelte';
 	import MeetingEditModal from '$lib/components/admin/MeetingEditModal.svelte';
 	import MeetingApplicantsModal from '$lib/components/admin/MeetingApplicantsModal.svelte';
@@ -129,11 +130,48 @@
 	async function deleteMeeting(id) {
 		if (!confirm('정말로 이 모임을 삭제하시겠습니까?')) return;
 		try {
+			// 0) Try to delete meeting image in Storage (if any)
+			try {
+				const meetingDoc = await getDoc(doc(db, 'meetings', id));
+				const meetingData = meetingDoc.exists() ? meetingDoc.data() : null;
+				if (meetingData?.image) await deleteFileByUrl(meetingData.image);
+			} catch (e) {
+				console.error('모임 이미지 삭제 중 오류:', e);
+			}
+
+			// 1) Delete related meeting applications
+			try {
+				const appsQ = query(collection(db, 'meeting_applications'), where('meetingId', '==', id));
+				const appsSnap = await getDocs(appsQ);
+				if (!appsSnap.empty) {
+					const delAppPromises = appsSnap.docs.map(d => deleteDoc(doc(db, 'meeting_applications', d.id)));
+					await Promise.all(delAppPromises);
+				}
+			} catch (e) {
+				console.error('신청 내역 삭제 중 오류:', e);
+			}
+
+			// 2) Delete related meeting reviews
+			try {
+				const reviewsQ = query(collection(db, 'meeting_reviews'), where('meetingId', '==', id));
+				const reviewsSnap = await getDocs(reviewsQ);
+				if (!reviewsSnap.empty) {
+					const delReviewPromises = reviewsSnap.docs.map(d => deleteDoc(doc(db, 'meeting_reviews', d.id)));
+					await Promise.all(delReviewPromises);
+				}
+			} catch (e) {
+				console.error('후기 삭제 중 오류:', e);
+			}
+
+			// 3) Finally delete the meeting document itself
 			await deleteDoc(doc(db, 'meetings', id));
 			meetings = meetings.filter(m => m.id !== id);
 			totalItems--; 
-			await modal.alert('삭제되었습니다.');
-		} catch (error) { console.error(error); }
+			await modal.alert('삭제되었습니다. 관련 신청/후기 문서도 함께 삭제했습니다.');
+		} catch (error) {
+			console.error(error);
+			await modal.alert('삭제 중 오류가 발생했습니다. 콘솔을 확인하세요.');
+		}
 	}
 
 	function formatDate(isoString) {

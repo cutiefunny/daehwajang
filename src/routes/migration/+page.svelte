@@ -1,11 +1,11 @@
-<script>
+<script lang="ts">
 	import { db } from '$lib/firebase';
 	import { collection, getDocs, writeBatch, doc } from 'firebase/firestore';
 	import { Database, Play, CheckCircle, AlertCircle, Loader2, FileText } from 'lucide-svelte';
 
-	let status = 'idle'; // idle, running, completed, error
-	let logs = [];
-	let progress = { current: 0, total: 0 };
+	let status: 'idle' | 'running' | 'completed' | 'error' = 'idle'; // idle, running, completed, error
+	let logs: string[] = [];
+	let progress: { current: number; total: number } = { current: 0, total: 0 };
 
 	function addLog(msg) {
 		logs = [...logs, msg];

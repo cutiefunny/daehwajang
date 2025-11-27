@@ -3,8 +3,9 @@
 	import { modal } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { 
-		collection, getDocs, query, orderBy, doc, deleteDoc, getCountFromServer, where, documentId 
-	} from 'firebase/firestore';
+			collection, getDocs, query, orderBy, doc, deleteDoc, getCountFromServer, where, documentId, getDoc 
+		} from 'firebase/firestore';
+	import { deleteFileByUrl } from '$lib/firebase';
 	import { Search, MessageSquare, Trash2, Eye, Users, X, ChevronLeft, ChevronRight } from 'lucide-svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
 
@@ -93,9 +94,39 @@
 	async function deleteChatRoom(id) {
 		if (!confirm('정말로 이 채팅방을 삭제하시겠습니까?')) return;
 		try {
+			// 0) Try to delete chat room image in Storage (if any)
+			try {
+				// try to find in memory first
+				const room = chatRooms.find(r => r.id === id);
+				if (room?.image) {
+					await deleteFileByUrl(room.image);
+				} else {
+					// fallback: fetch doc
+					const roomSnap = await getDoc(doc(db, 'chatRooms', id));
+					if (roomSnap.exists() && roomSnap.data().image) {
+						await deleteFileByUrl(roomSnap.data().image);
+					}
+				}
+			} catch (e) {
+				console.error('채팅방 이미지 삭제 중 오류:', e);
+			}
+
+			// 1) Delete messages in the subcollection to avoid orphaned documents
+			try {
+				const messagesColl = collection(db, 'chatRooms', id, 'messages');
+				const messagesSnap = await getDocs(messagesColl);
+				if (!messagesSnap.empty) {
+					const delMsgs = messagesSnap.docs.map(d => deleteDoc(doc(db, 'chatRooms', id, 'messages', d.id)));
+					await Promise.all(delMsgs);
+				}
+			} catch (e) {
+				console.error('메시지 삭제 중 오류:', e);
+			}
+
+			// 2) Delete the chat room document itself
 			await deleteDoc(doc(db, 'chatRooms', id));
 			chatRooms = chatRooms.filter(r => r.id !== id);
-			await modal.alert('삭제되었습니다.');
+			await modal.alert('삭제되었습니다. 하위 메시지도 함께 삭제했습니다.');
 		} catch (error) {
 			console.error("삭제 실패:", error);
 			await modal.alert("삭제 중 오류가 발생했습니다.");
