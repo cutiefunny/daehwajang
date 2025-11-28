@@ -3,10 +3,10 @@
     import { page } from '$app/stores';
     import { user, modal } from '$lib/stores';
     import { db } from '$lib/firebase';
-    // [수정] deleteDoc 제거, updateDoc 추가
-    import { doc, getDoc, addDoc, collection, query, where, getDocs, serverTimestamp, updateDoc, orderBy, limit } from 'firebase/firestore';
+    import { doc, getDoc, addDoc, collection, query, where, getDocs, serverTimestamp, updateDoc, orderBy, limit, deleteDoc } from 'firebase/firestore';
     import { ArrowLeft, Calendar, MapPin, User, CheckCircle, AlertCircle, Star, Crown, XCircle, Ban } from 'lucide-svelte';
     import Skeleton from '$lib/components/Skeleton.svelte';
+    import PaymentModal from '$lib/components/PaymentModal.svelte';
 
     const NAVER_CLIENT_ID = import.meta.env.VITE_NAVER_MAPS_CLIENT_ID;
     const meetingId = $page.params.id;
@@ -16,13 +16,16 @@
     let isLoading = true;
     let isApplying = false;
     
+    // 결제 모달 상태
+    let showPaymentModal = false;
+    let tempOrderId = '';
+    
     let applicationStatus = null; 
     let applicationId = null;
     let isMeetingPast = false;
 
     let mapElement;
 
-    // 유저 정보가 로드되면 즉시 상태 확인
     $: if ($user && meetingId) {
         checkApplicationStatus();
     }
@@ -54,6 +57,8 @@
 
                 meeting = { id: docSnap.id, ...data };
                 
+                if (meeting.price === undefined) meeting.price = 10000;
+
                 const meetingDate = new Date(meeting.date);
                 const now = new Date();
                 isMeetingPast = meetingDate < now;
@@ -145,18 +150,28 @@
         if (!$user) return await modal.alert('로그인이 필요한 서비스입니다.');
         if (isApplying) return;
         
-        // [추가] 취소된 상태인 경우 신청 차단
         if (applicationStatus === 'canceled') {
             await modal.alert('신청을 취소한 모임은 다시 신청할 수 없습니다.');
             return;
         }
 
+        // [수정] 거절된 경우 신청 차단
         if (applicationStatus === 'rejected') {
-             if (!(await modal.confirm('이전에 거절된 내역이 있습니다. 다시 신청하시겠습니까?'))) return;
-        } else {
-             if (!(await modal.confirm('이 모임에 참여 신청하시겠습니까?'))) return;
+             await modal.alert('호스트에 의해 거절된 모임은 다시 신청할 수 없습니다.');
+             return;
         }
 
+        const datePart = new Date().toISOString().slice(0,10).replace(/-/g, '');
+        const randomPart = Math.random().toString(36).substring(2, 8).toUpperCase();
+        tempOrderId = `ORD-${datePart}-${randomPart}`;
+
+        showPaymentModal = true;
+    }
+
+    async function handlePaymentComplete(event) {
+        const paymentResult = event.detail;
+        showPaymentModal = false;
+        
         isApplying = true;
         try {
             const docRef = await addDoc(collection(db, 'meeting_applications'), {
@@ -168,7 +183,14 @@
                 userEmail: $user.email,
                 userImage: $user.photoURL,
                 status: 'pending', 
-                appliedAt: serverTimestamp()
+                appliedAt: serverTimestamp(),
+                
+                paymentKey: paymentResult.paymentKey,
+                orderId: paymentResult.orderId,
+                paymentAmount: paymentResult.amount,
+                paymentMethod: paymentResult.method,
+                paymentStatus: 'DONE', 
+                paidAt: paymentResult.approvedAt
             });
             
             applicationId = docRef.id;
@@ -186,8 +208,8 @@
                             await addDoc(collection(db, 'notifications'), {
                                 targetUserId: meeting.hostId,
                                 type: 'application',
-                                title: '새로운 참가 신청 👋',
-                                body: `'${meeting.title}' 모임에 ${$user.displayName || '누군가'}님이 참가 신청을 했습니다.`,
+                                title: '새로운 참가 신청 (결제 완료) 💰',
+                                body: `'${meeting.title}' 모임에 ${$user.displayName || '누군가'}님이 참가 신청 및 결제를 완료했습니다.`,
                                 link: `/my-daehwajang?meetingId=${meeting.id}&view=applicants`,
                                 read: false,
                                 timestamp: serverTimestamp()
@@ -200,31 +222,27 @@
             }
 
             applicationStatus = 'pending';
-            await modal.alert('신청이 완료되었습니다! 호스트의 승인을 기다려주세요.');
+            await modal.alert('결제가 완료되어 신청되었습니다! 호스트의 승인을 기다려주세요.');
         } catch (error) {
             console.error('신청 실패:', error);
-            await modal.alert('신청 중 오류가 발생했습니다.');
+            await modal.alert('결제는 성공했으나 신청 처리 중 오류가 발생했습니다. 관리자에게 문의하세요.');
         } finally {
             isApplying = false;
         }
     }
 
-    // [수정] 신청 취소 함수 (문서 유치 + 상태 변경)
     async function cancelApplication() {
         if (!applicationId) return;
-        
-        // [수정] 컨펌 메시지 변경
-        if (!(await modal.confirm('취소 시 이 모임을 다시 신청할 수 없습니다. 취소하시겠습니까?'))) return;
+        if (!(await modal.confirm('취소 시 이 모임을 다시 신청할 수 없습니다. 환불 규정에 따라 취소하시겠습니까?'))) return;
 
         try {
-            // [수정] deleteDoc 대신 updateDoc 사용
             await updateDoc(doc(db, 'meeting_applications', applicationId), {
-                status: 'canceled'
+                status: 'canceled',
+                paymentStatus: 'CANCELED_REQUEST'
             });
             
             applicationStatus = 'canceled';
-            // applicationId는 유지됨 (문서가 남아있으므로)
-            await modal.alert('신청이 취소되었습니다.');
+            await modal.alert('신청이 취소되었습니다. (환불 규정에 따라 처리됩니다)');
         } catch (error) {
             console.error('취소 실패:', error);
             await modal.alert('취소 처리 중 오류가 발생했습니다.');
@@ -271,6 +289,17 @@
 <svelte:head>
     <script type="text/javascript" src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId={NAVER_CLIENT_ID}&submodules=geocoder"></script>
 </svelte:head>
+
+{#if showPaymentModal && meeting && $user}
+    <PaymentModal 
+        amount={meeting.price}
+        orderId={tempOrderId}
+        orderName={meeting.title}
+        customerName={$user.displayName || '구매자'}
+        on:close={() => showPaymentModal = false}
+        on:complete={handlePaymentComplete}
+    />
+{/if}
 
 <div class="page-container">
     {#if isLoading}
@@ -384,12 +413,12 @@
                     <Ban size={18} /> 신청 취소됨 (재신청 불가)
                 </button>
             {:else if applicationStatus === 'rejected'}
-                <button class="action-btn primary" on:click={applyForMeeting} disabled={isApplying}>
-                     <Ban size={18} /> 참여 재신청하기
+                <button class="action-btn disabled" disabled>
+                     <Ban size={18} /> 거절됨 (신청 불가)
                 </button>
             {:else}
                 <button class="action-btn primary" on:click={applyForMeeting} disabled={isApplying}>
-                    {isApplying ? '처리 중...' : '참여 신청하기'}
+                    {isApplying ? '처리 중...' : '참여 신청하기 (결제)'}
                 </button>
             {/if}
         </div>

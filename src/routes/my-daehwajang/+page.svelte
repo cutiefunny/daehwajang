@@ -1,11 +1,12 @@
 <script>
 	import { onMount } from 'svelte';
-    // [수정] page 스토어 추가 (URL 파라미터 확인용)
+	// [수정] page 스토어 import 유지
 	import { page } from '$app/stores';
 	import { user } from '$lib/stores';
 	import { db } from '$lib/firebase';
 	import { collection, query, where, getDocs, doc, getDoc, orderBy } from 'firebase/firestore';
-	import { Calendar, MapPin, Loader2, Plus, Star, Check, Crown, Users } from 'lucide-svelte';
+	// [수정] Ban 아이콘 추가
+	import { Calendar, MapPin, Loader2, Plus, Star, Check, Crown, Users, Ban } from 'lucide-svelte';
 	import { goto } from '$app/navigation';
 	import MeetingReviewModal from '$lib/components/MeetingReviewModal.svelte';
 	import MeetingApplicantsModal from '$lib/components/admin/MeetingApplicantsModal.svelte';
@@ -104,23 +105,21 @@
 			});
 			const allMyMeetings = Array.from(meetingMap.values());
 
-			// 정렬 및 필터링
+			// 정렬
 			allMyMeetings.sort((a, b) => new Date(b.date) - new Date(a.date));
-			myMeetings = allMyMeetings.filter(m => m.status !== 'rejected');
+			
+			// [수정] 거절된(rejected) 내역도 포함하여 보여줌 (필터링 제거)
+			myMeetings = allMyMeetings;
 
-            // [추가] 딥링크 처리 로직: URL에 meetingId와 view=applicants가 있으면 모달 열기
+            // 딥링크 처리
             const params = $page.url.searchParams;
             const targetId = params.get('meetingId');
             const viewMode = params.get('view');
 
             if (targetId && viewMode === 'applicants') {
                 const targetMeeting = myMeetings.find(m => m.id === targetId);
-                // 해당 모임이 존재하고, 내가 호스트인 경우에만 오픈
                 if (targetMeeting && targetMeeting.isHost) {
                     openApplicantsModal(targetMeeting);
-                    
-                    // (선택사항) URL을 깔끔하게 정리하고 싶다면 아래 주석 해제
-                    // goto('/my-daehwajang', { replaceState: true, noScroll: true });
                 }
             }
 
@@ -234,6 +233,12 @@
 							{#if !meeting.isHost}
 								{#if meeting.status === 'pending'}
 									<span class="status-badge pending">신청 중</span>
+								{:else if meeting.status === 'rejected'}
+									<span class="status-badge rejected">
+										<Ban size={12} /> 거절됨
+									</span>
+								{:else if meeting.status === 'canceled'}
+									<span class="status-badge canceled">취소됨</span>
 								{:else if meeting.isPast}
 									<span class="status-badge completed">참여 완료</span>
 								{:else}
@@ -241,7 +246,7 @@
 								{/if}
 							{/if}
 
-							{#if meeting.isPast && !meeting.isHost}
+							{#if meeting.isPast && !meeting.isHost && meeting.status === 'accepted'}
 								{#if meeting.hasReviewed}
 									<span class="reviewed-badge">
 										<Check size={12} /> 작성 완료
@@ -412,6 +417,18 @@
 	.status-badge.completed {
 		background-color: #EDF2F7;
 		color: #4A5568;
+		border: 1px solid #E2E8F0;
+	}
+	
+	/* [수정] 거절됨/취소됨 스타일 */
+	.status-badge.rejected {
+		background-color: #FFF5F5;
+		color: #C53030;
+		border: 1px solid #FEB2B2;
+	}
+	.status-badge.canceled {
+		background-color: #EDF2F7;
+		color: #718096;
 		border: 1px solid #E2E8F0;
 	}
 
