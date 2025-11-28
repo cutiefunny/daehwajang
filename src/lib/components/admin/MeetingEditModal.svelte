@@ -10,8 +10,11 @@
 
 	const dispatch = createEventDispatcher();
 	let isSaving = false;
-	let formData = { ...meeting };
 	
+	// [수정] 초기 데이터 로드 시 price가 없으면 0으로 설정
+	let formData = { ...meeting };
+	if (formData.price === undefined) formData.price = 0;
+
 	let reviews = [];
 	let isLoadingReviews = false;
 
@@ -22,7 +25,7 @@
 		fetchReviews();
 	});
 
-	// [추가] 검색 키워드 생성 유틸리티
+	// 검색 키워드 생성 유틸리티
 	function generateSearchKeywords(text) {
 		if (!text) return [];
 		const keywords = [];
@@ -89,7 +92,8 @@
 				location: formData.location,
 				description: formData.description || '',
 				hostName: formData.hostName,
-				// [수정] 검색용 키워드 업데이트
+				// [수정] 참가비 업데이트 (숫자형 변환)
+				price: Number(formData.price) || 0,
 				_searchKeywords: [
 					...generateSearchKeywords(formData.title),
 					...generateSearchKeywords(formData.location)
@@ -141,6 +145,10 @@
 					<div class="form-group">
 						<label for="meeting-category">카테고리</label>
 						<input id="meeting-category" type="text" bind:value={formData.category} />
+					</div>
+					<div class="form-group">
+						<label for="meeting-price">참가비 (원)</label>
+						<input id="meeting-price" type="number" bind:value={formData.price} placeholder="0" min="0" step="1000" />
 					</div>
 					<div class="form-group">
 						<label for="meeting-host">호스트</label>

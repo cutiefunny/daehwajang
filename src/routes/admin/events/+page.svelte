@@ -32,8 +32,8 @@
 		startDate: '',
 		endDate: '',
 		image: '',
-		description: '', // [추가] 이벤트 설명
-		link: ''         // [추가] 버튼 링크
+		description: '',
+		link: ''
 	};
 
 	// 이벤트 목록 불러오기
@@ -57,7 +57,7 @@
 	// 등록 모달 열기
 	function openCreateModal() {
 		isEditMode = false;
-		// 폼 초기화 (새 필드 포함)
+		// 폼 초기화
 		formData = { id: null, title: '', startDate: '', endDate: '', image: '', description: '', link: '' };
 		isModalOpen = true;
 	}
@@ -91,8 +91,8 @@
 				startDate: formData.startDate,
 				endDate: formData.endDate,
 				image: formData.image,
-				description: formData.description, // 저장
-				link: formData.link               // 저장
+				description: formData.description,
+				link: formData.link
 			};
 
 			if (isEditMode) {
@@ -249,7 +249,17 @@
 </div>
 
 {#if isModalOpen}
-	<div class="modal-overlay" role="button" tabindex="0" on:click={closeModal} on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && closeModal()}>
+	<div class="modal-overlay" 
+		role="button" 
+		tabindex="0" 
+		on:click={closeModal} 
+		on:keydown={(e) => {
+			if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+				e.preventDefault();
+				closeModal();
+			}
+		}}
+	>
 		<div class="modal-content" role="dialog" aria-modal="true" tabindex="0" on:keydown={(e) => e.key === 'Escape' && closeModal()} on:click|stopPropagation>
 			<div class="modal-header">
 				<h3>{isEditMode ? '이벤트 수정' : '새 이벤트 작성'}</h3>

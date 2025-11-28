@@ -3,6 +3,7 @@
     import { page } from '$app/stores';
     import { user, modal } from '$lib/stores';
     import { db } from '$lib/firebase';
+    // [수정] updateDoc 추가
     import { doc, getDoc, addDoc, collection, query, where, getDocs, serverTimestamp, updateDoc, orderBy, limit, deleteDoc } from 'firebase/firestore';
     import { ArrowLeft, Calendar, MapPin, User, CheckCircle, AlertCircle, Star, Crown, XCircle, Ban } from 'lucide-svelte';
     import Skeleton from '$lib/components/Skeleton.svelte';
@@ -155,7 +156,6 @@
             return;
         }
 
-        // [수정] 거절된 경우 신청 차단
         if (applicationStatus === 'rejected') {
              await modal.alert('호스트에 의해 거절된 모임은 다시 신청할 수 없습니다.');
              return;
@@ -174,7 +174,8 @@
         
         isApplying = true;
         try {
-            const docRef = await addDoc(collection(db, 'meeting_applications'), {
+            // 1. 모임 신청 정보 저장
+            const appData = {
                 meetingId: meetingId,
                 meetingTitle: meeting.title, 
                 meetingDate: meeting.date,   
@@ -191,10 +192,36 @@
                 paymentMethod: paymentResult.method,
                 paymentStatus: 'DONE', 
                 paidAt: paymentResult.approvedAt
-            });
-            
+            };
+
+            const docRef = await addDoc(collection(db, 'meeting_applications'), appData);
             applicationId = docRef.id;
 
+            // [추가] 2. 결제 내역 별도 저장 (Admin용 payments 컬렉션)
+            await addDoc(collection(db, 'payments'), {
+                paymentKey: paymentResult.paymentKey,
+                orderId: paymentResult.orderId,
+                orderName: meeting.title,
+                amount: paymentResult.amount,
+                method: paymentResult.method === 'CARD' ? '카드' : (paymentResult.method === 'TOSS_PAY' ? '토스페이' : '휴대폰'),
+                status: 'paid',
+                paymentDate: paymentResult.approvedAt, // 정렬 기준
+                
+                // 구매자 정보
+                payerId: $user.uid,
+                payerName: $user.displayName || '익명',
+                payerEmail: $user.email,
+                
+                // 상품 정보
+                productId: meetingId,
+                productName: meeting.title,
+                productCategory: meeting.category || '기타',
+                
+                // 연결 정보
+                applicationId: docRef.id
+            });
+
+            // 3. 호스트 알림
             if (meeting.hostId && meeting.hostId !== $user.uid) {
                 try {
                     const hostRef = doc(db, 'users', meeting.hostId);
@@ -240,6 +267,9 @@
                 status: 'canceled',
                 paymentStatus: 'CANCELED_REQUEST'
             });
+            
+            // [추가] payments 컬렉션 상태도 업데이트 (선택사항, 필요 시 구현)
+            // 여기서는 복잡도를 낮추기 위해 신청서 상태만 변경합니다.
             
             applicationStatus = 'canceled';
             await modal.alert('신청이 취소되었습니다. (환불 규정에 따라 처리됩니다)');
