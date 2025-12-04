@@ -21,12 +21,11 @@
 	let users = [];
 	let isLoading = true;
 	let searchTerm = '';
-
 	// 페이지네이션 상태
 	let currentPage = 1;
 	const itemsPerPage = 10;
 	let totalItems = 0;
-	let lastVisible = null; 
+	let lastVisible = null;
 	let pageStartDocs = []; 
 
 	let isModalOpen = false;
@@ -52,7 +51,6 @@
 		try {
 			let q = collection(db, 'users');
 			const trimmedTerm = searchTerm.trim().replace(/\s/g, '').toLowerCase();
-			
 			// [수정] 검색 로직 변경 (Bi-gram)
 			if (trimmedTerm && trimmedTerm.length >= 2) {
 				// 2글자 이상일 경우 _searchKeywords 배열에 포함되어 있는지 검사
@@ -73,7 +71,6 @@
 			} else if (direction === 'prev' && pageStartDocs.length > 1) {
 				const prevDoc = pageStartDocs[currentPage - 2];
 				q = query(q, startAfter(prevDoc));
-				
 				if (currentPage === 2) {
 					// 1페이지로 돌아갈 때 쿼리 초기화
 					let resetQ = collection(db, 'users');
@@ -92,7 +89,6 @@
 			}
 
 			const querySnapshot = await getDocs(q);
-			
 			if (!querySnapshot.empty) {
 				lastVisible = querySnapshot.docs[querySnapshot.docs.length - 1];
 				if (direction === 'next') {
@@ -112,7 +108,6 @@
 					status: data.status || 'active'
 				};
 			});
-
 		} catch (error) {
 			console.error("회원 목록 로딩 실패:", error);
 		} finally {
@@ -151,42 +146,48 @@
 				await fetchUsers('prev');
 				currentPage = newPage;
 			}
-
-			// Jump to first page (reset cursor)
-			async function goToFirst() {
-				currentPage = 1;
-				pageStartDocs = [];
-				lastVisible = null;
-				await fetchUsers();
-			}
-
-			// Attempt to jump to last page by iterating next pages (bounded to avoid huge loops)
-			async function goToLast() {
-				const target = Math.ceil(totalItems / itemsPerPage) || 1;
-				if (target <= 1) return;
-				// reset
-				currentPage = 1;
-				pageStartDocs = [];
-				lastVisible = null;
-				const maxIterations = Math.min(target, 50); // safety cap
-				for (let p = 2; p <= maxIterations; p++) {
-					await fetchUsers('next');
-					currentPage = p;
-				}
-				if (target > maxIterations) console.warn('Stopped at iteration cap when jumping to last page');
-			}
 		}
+	}
+
+	// [추가] 처음 페이지로 이동
+	async function goToFirst() {
+		currentPage = 1;
+		pageStartDocs = [];
+		lastVisible = null;
+		await fetchUsers();
+	}
+
+	// [추가] 마지막 페이지로 이동 (반복 fetch)
+	async function goToLast() {
+		const target = Math.ceil(totalItems / itemsPerPage) || 1;
+		if (target <= 1) return;
+		// reset
+		currentPage = 1;
+		pageStartDocs = [];
+		lastVisible = null;
+		const maxIterations = Math.min(target, 50); // safety cap
+		for (let p = 2; p <= maxIterations; p++) {
+			await fetchUsers('next');
+			currentPage = p;
+		}
+		if (target > maxIterations) console.warn('Stopped at iteration cap when jumping to last page');
 	}
 
 	async function toggleStatus(user) {
 		const newStatus = user.status === 'active' ? 'suspended' : 'active';
 		if (!confirm(`${user.nickname} 님의 상태를 변경하시겠습니까?`)) return;
-
 		try {
 			const userRef = doc(db, 'users', user.id);
 			await updateDoc(userRef, { status: newStatus });
 			users = users.map(u => u.id === user.id ? { ...u, status: newStatus } : u);
-		} catch (error) { console.error(error); }
+		} catch (error) { console.error(error);
+		}
+	}
+
+	// [추가] 이미지 로드 에러 핸들러
+	function handleImageError(userId) {
+		// 해당 유저의 이미지를 null로 설정하여 대체 UI(이니셜)가 렌더링되도록 함
+		users = users.map(u => u.id === userId ? { ...u, image: null } : u);
 	}
 
 	function formatDate(isoString) {
@@ -246,12 +247,17 @@
 			</thead>
 			<tbody>
 				{#if users.length > 0}
-					{#each users as user}
+					{#each users as user (user.id)}
 						<tr on:click={() => openEditModal(user)} class="clickable-row">
 							<td>
 								<div class="avatar">
 									{#if user.image}
-										<img src={user.image} alt={user.nickname} />
+										<img 
+											src={user.image} 
+											alt={user.nickname}
+											referrerpolicy="no-referrer"
+											on:error={() => handleImageError(user.id)}
+										/>
 									{:else}
 										<span class="initial">{user.nickname?.[0] || 'U'}</span>
 									{/if}
@@ -323,8 +329,6 @@
 	tr:last-child td { border-bottom: none; }
 	.clickable-row { cursor: pointer; transition: background 0.1s; }
 	.clickable-row:hover { background-color: #f0f4f8; }
-
-	/* pagination styles are provided by the shared Pagination component */
 
 	.avatar { width: 40px; height: 40px; border-radius: 50%; overflow: hidden; background-color: #edf2f7; display: flex; align-items: center; justify-content: center; }
 	.avatar img { width: 100%; height: 100%; object-fit: cover; }
