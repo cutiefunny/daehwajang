@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>대화장 - 더 넓은 대화의 장</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #3182ce;
+            --secondary-color: #2b6cb0;
+            --accent-color: #ebf8ff;
+            --text-color: #2d3748;
+            --light-gray: #f7fafc;
+            --white: #ffffff;
+            --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            --radius: 16px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--light-gray);
+            /* [수정] 단어 단위 줄바꿈 적용 */
+            word-break: keep-all;
+            overflow-wrap: break-word;
+        }
+
+        a {
+            text-decoration: none;
+            color: inherit;
+        }
+
+        /* 헤더 스타일 */
+        header {
+            background-color: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: var(--primary-color);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .nav-btn {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 0.5rem 1.2rem;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: background 0.2s;
+        }
+
+        .nav-btn:hover {
+            background-color: var(--secondary-color);
+        }
+
+        /* 히어로 섹션 */
+        .hero {
+            background: linear-gradient(135deg, #ebf8ff 0%, #fff 100%);
+            padding: 4rem 2rem;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .hero h1 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            line-height: 1.3;
+            color: #1a202c;
+        }
+
+        .hero p {
+            font-size: 1.1rem;
+            color: #4a5568;
+            max-width: 600px;
+            margin-bottom: 1rem;
+        }
+
+        .hero-btn {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 1rem 2.5rem;
+            border-radius: 30px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            box-shadow: 0 4px 12px rgba(49, 130, 206, 0.3);
+            transition: transform 0.2s;
+        }
+
+        .hero-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        /* 공통 섹션 스타일 */
+        section {
+            padding: 4rem 2rem;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .section-title {
+            text-align: center;
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-bottom: 3rem;
+            position: relative;
+        }
+
+        .section-title::after {
+            content: '';
+            display: block;
+            width: 50px;
+            height: 4px;
+            background-color: var(--primary-color);
+            margin: 10px auto 0;
+            border-radius: 2px;
+        }
+
+        /* 기능 소개 그리드 */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+        }
+
+        .feature-card {
+            background: white;
+            padding: 2rem;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            text-align: center;
+            transition: transform 0.3s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .icon-box {
+            width: 60px;
+            height: 60px;
+            background-color: var(--accent-color);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 1.5rem;
+            color: var(--primary-color);
+            font-size: 1.5rem;
+        }
+
+        .feature-card h3 {
+            margin-bottom: 1rem;
+            font-size: 1.2rem;
+        }
+
+        .feature-card p {
+            font-size: 0.95rem;
+            color: #718096;
+        }
+
+        /* 카테고리 섹션 */
+        .categories {
+            background-color: white;
+            border-radius: var(--radius);
+            padding: 3rem 2rem;
+            text-align: center;
+        }
+
+        .category-list {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 2rem;
+        }
+
+        .category-chip {
+            padding: 0.8rem 1.5rem;
+            background-color: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 30px;
+            font-weight: 600;
+            color: #4a5568;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .category-chip i {
+            color: var(--primary-color);
+        }
+
+        /* 사용 가이드 (Step) */
+        .steps {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .step-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 1.5rem;
+            background: white;
+            padding: 1.5rem;
+            border-radius: var(--radius);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+        }
+
+        .step-number {
+            background-color: var(--primary-color);
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+
+        .step-content h4 {
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .step-content p {
+            font-size: 0.95rem;
+            color: #718096;
+        }
+
+        /* FAQ 스타일 */
+        .faq-item {
+            background-color: white;
+            margin-bottom: 1rem;
+            padding: 1.5rem;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+        }
+        .faq-question {
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            color: #2d3748;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .faq-answer {
+            color: #718096;
+            font-size: 0.95rem;
+            padding-left: 1.5rem;
+        }
+
+        /* 푸터 */
+        footer {
+            background-color: #2d3748;
+            color: white;
+            text-align: center;
+            padding: 2rem;
+            margin-top: 4rem;
+        }
+
+        footer p {
+            opacity: 0.7;
+            font-size: 0.9rem;
+        }
+
+        /* 모바일 대응 */
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 2rem; }
+            .section-title { font-size: 1.5rem; }
+            .features-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">
+            <i class="fa-solid fa-comments"></i> 대화장
+        </div>
+        <a href="/" class="nav-btn">앱 시작하기</a>
+    </header>
+
+    <section class="hero">
+        <h1>더 많은 이들과<br>소통하는, 대화장</h1>
+        <p>북성로 대화장에서 새로운 서비스를 시작합니다.<br>각자의 취향대로 대화의 장을 열어 보세요.</p>
+        <img src="daehwajang.jpg" alt="대화장 이미지" style="width: 100%; max-width: 800px; border-radius: 16px; box-shadow: var(--shadow);">
+        <a href="/meetings" class="hero-btn">지금 모임 둘러보기</a>
+    </section>
+
+    <section id="features">
+        <h2 class="section-title">대화장은 이런 곳이에요</h2>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="icon-box">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                </div>
+                <h3>간편한 모임 찾기</h3>
+                <p>소셜, 취미, 운동 등 카테고리별로 원하는 모임을 쉽게 찾을 수 있어요. 내가 사는 지역 근처의 모임을 검색해보세요.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon-box">
+                    <i class="fa-solid fa-pen-to-square"></i>
+                </div>
+                <h3>누구나 호스트가 되어보세요</h3>
+                <p>특별한 자격은 필요 없습니다. 나누고 싶은 주제가 있다면 누구나 '호스트'가 되어 모임을 개설할 수 있습니다.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon-box">
+                    <i class="fa-solid fa-users"></i>
+                </div>
+                <h3>안전한 참여 시스템</h3>
+                <p>참가 신청 후 호스트의 승인을 통해 참여가 확정됩니다. 노쇼 방지를 위한 최소한의 규칙을 운영합니다.</p>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <div class="categories">
+            <h2 class="section-title" style="margin-bottom: 1rem;">다양한 주제의 대화</h2>
+            <p style="color: #718096; margin-bottom: 2rem;">오늘 당신은 어떤 대화를 나누고 싶으신가요?</p>
+            <div class="category-list">
+                <div class="category-chip"><i class="fa-regular fa-comments"></i> 소셜</div>
+                <div class="category-chip"><i class="fa-solid fa-palette"></i> 취미</div>
+                <div class="category-chip"><i class="fa-solid fa-dumbbell"></i> 운동</div>
+                <div class="category-chip"><i class="fa-solid fa-book-open"></i> 독서</div>
+                <div class="category-chip"><i class="fa-solid fa-plane"></i> 여행</div>
+                <div class="category-chip"><i class="fa-solid fa-ellipsis"></i> 기타</div>
+            </div>
+        </div>
+    </section>
+
+    <section id="guide">
+        <h2 class="section-title">이렇게 시작해보세요</h2>
+        <div class="steps">
+            <div class="step-item">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h4>둘러보기 및 검색</h4>
+                    <p>'예정된 모임' 목록에서 날짜순으로 정렬된 모임을 확인하세요. 검색창을 통해 관심 있는 키워드나 지역을 검색할 수 있습니다.</p>
+                </div>
+            </div>
+            <div class="step-item">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h4>참여 신청하기</h4>
+                    <p>마음에 드는 모임을 클릭하여 상세 정보를 확인하세요. 일시, 장소(지도), 참가비를 확인하고 '참여 신청' 버튼을 누르면 됩니다.</p>
+                </div>
+            </div>
+            <div class="step-item">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h4>모임 개설하기 (선택)</h4>
+                    <p>원하는 모임이 없나요? 우측 하단의 <b>+</b> 버튼을 눌러 직접 모임을 만들어보세요. 네이버 지도로 정확한 장소를 지정할 수 있습니다.</p>
+                </div>
+            </div>
+            <div class="step-item">
+                <div class="step-number">4</div>
+                <div class="step-content">
+                    <h4>즐거운 만남</h4>
+                    <p>약속된 시간에 모임 장소에 나가 즐거운 시간을 보내세요! 내가 참여한 내역은 언제든 확인 가능합니다.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="faq">
+        <h2 class="section-title">자주 묻는 질문</h2>
+        <div class="faq-item">
+            <div class="faq-question"><i class="fa-solid fa-circle-question" style="color:#cbd5e0;"></i> 참가비는 왜 있나요?</div>
+            <div class="faq-answer">
+                건전한 모임 문화를 위해 '노쇼(No-Show)' 방지 차원의 소액 참가비가 있을 수 있습니다. 이는 호스트가 설정하며, 상세 페이지에서 확인할 수 있습니다.
+            </div>
+        </div>
+        <div class="faq-item">
+            <div class="faq-question"><i class="fa-solid fa-circle-question" style="color:#cbd5e0;"></i> 지난 모임도 볼 수 있나요?</div>
+            <div class="faq-answer">
+                네, 메인 화면에서 '지난 모임 보기' 버튼을 클릭하면 종료된 모임들의 기록을 최신순으로 둘러볼 수 있습니다.
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div style="font-size: 1.2rem; font-weight: bold; margin-bottom: 1rem;">대화의 장</div>
+        <p>&copy; 2025 근육고양이 스튜디오. All rights reserved.</p>
+        <p>함께하는 즐거움, 대화장에서 시작하세요.</p>
+    </footer>
+
+</body>
+</html>
